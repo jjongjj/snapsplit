@@ -84,10 +84,10 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
     """Build the joined pin/socket operands per piece.
 
     ``pieces``: world-space bmeshes of the parts. With ``source_bvh`` (BVHTree of
-    the uncut source) and ``planes`` ({cut uid: (co, n, gap)} of the enabled
-    cuts) a connector whose pin or socket would break through the outer surface
-    or reach across another cut into a third part is skipped with a warning
-    (connectors/fit.py, samples at most ``max_step`` apart). Returns
+    the uncut source) and ``planes`` ({cut uid: fit barrier} of the enabled
+    cuts) a connector whose pin or socket would break through the outer surface,
+    reach across another cut into a third part or cross its own curved seam is
+    skipped with a warning (connectors/fit.py, samples at most ``max_step`` apart). Returns
     ``(pins, sockets, warnings, overlapping)``: ``pins``/``sockets`` are dicts
     piece index -> bmesh (caller frees them), ``overlapping`` the set of piece
     indices where two connector solids may intersect.
@@ -107,11 +107,17 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
             continue
         if source_bvh is not None:
             others = [pl for uid, pl in (planes or {}).items() if uid != spec.cut_uid]
+            own = (planes or {}).get(spec.cut_uid)
+            own = own if isinstance(own, fit.RibbonBarrier) else None
             tol = -SURFACE_TOLERANCE * spec.length
-            res = fit.check(spec, source_bvh, others, tol, max_step=max_step)
+            res = fit.check(spec, source_bvh, others, tol, max_step=max_step, own=own)
             if res.plane_margin < tol:
                 warnings.append(f"{spec.label}: pin or socket would reach across another cut into a part "
                                 "without a socket, skipped (move it, or Distribute again)")
+                continue
+            if res.own_margin < 0.0:
+                warnings.append(f"{spec.label}: the curved seam bends into the pin or socket, skipped "
+                                "(move it to a flatter part of the seam, or use a shorter connector)")
                 continue
             if not res.ok(tol):
                 warnings.append(f"{spec.label}: pin or socket would break through the outer surface, skipped "
@@ -136,21 +142,35 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
     return pins, sockets, warnings, overlapping
 
 
+def operations(pins, sockets):
+    """[(piece index, operand bmesh, operation)] in the order apply_step runs them."""
+    out = []
+    for index in sorted(set(pins) | set(sockets)):
+        for table, operation in ((pins, 'UNION'), (sockets, 'DIFFERENCE')):
+            if index in table:
+                out.append((index, table[index], operation))
+    return out
+
+
+def apply_step(obj, operand, operation, preference='AUTO', self_intersect=False):
+    """One connector boolean on a part. Returns the BooleanResult.
+
+    The part must have an identity transform (its mesh is in world space) and be
+    visible in the view layer; the caller frees the operand bmesh.
+    ``self_intersect``: the operand has intersecting solids, or the part has
+    intersecting shells (the exact solver then needs self-intersection handling).
+    """
+    return boolean.apply(obj, operand, operation, preference, self_intersect=self_intersect)
+
+
 def apply_to_parts(part_objects, pins, sockets, preference='AUTO', overlapping=()):
     """One UNION (pins) and one DIFFERENCE (sockets) per part. Returns warnings.
 
-    Part objects must have identity transforms (their mesh is in world space)
-    and be visible in the view layer. The caller frees the operand bmeshes.
-    ``overlapping``: piece indices whose joined operand has intersecting solids
-    (the exact solver then needs self-intersection handling).
+    ``overlapping``: piece indices whose boolean needs self-intersection handling.
     """
     warnings = []
-    for index, obj in enumerate(part_objects):
-        for table, operation in ((pins, 'UNION'), (sockets, 'DIFFERENCE')):
-            bm = table.get(index)
-            if bm is None:
-                continue
-            result = boolean.apply(obj, bm, operation, preference, self_intersect=index in overlapping)
-            if not result.ok:
-                warnings.append(result.message)
+    for index, operand, operation in operations(pins, sockets):
+        result = apply_step(part_objects[index], operand, operation, preference, index in overlapping)
+        if not result.ok:
+            warnings.append(result.message)
     return warnings
