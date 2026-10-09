@@ -227,12 +227,38 @@ origin (0,0,2), gap 0.5)에서 Z 컷 커넥터 1의 핀(AA 쪽, 중심 (16.4,−
 
 ---
 
+## D7 수정 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop ff7ecdb)
+
+독립 검증자, 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa6/`, 같은 안전 규칙. Millimeters + Unit Scale 0.001.
+
+1. 재로드(`qa6/reload.py`): `bl_ext.splitforge_dev.splitforge*` 40개 purge 후 enable.
+2. `QA5_Steep`(Z −6 + normal (1,0.2,1.2), gap 0.5)을 **저장된 옛 커넥터 그대로** Rebuild(`qa6/steep.py`): 경고 3건
+   "Cut Z connector 1/2, Cut 2 connector 3: … reach across another cut into a part without a socket, skipped", 4파트 매니폴드,
+   모든 정점 큐브 안, **AA 핀이 BB로 2.64 mm 들어가던 관입 사라짐**.
+3. Distribute 다시(컷당 2개, "2 position(s) dropped") → Rebuild 경고 0, 4파트 매니폴드, 외곽 밖 0, 파트 간 관입 없음
+   (레이 패리티 probe가 AA↔AB 1정점 0.2 mm를 표시했으나 `fit.is_inside`로 재확인 시 0건 → probe 쪽 레이 스침 오탐), 고아 메쉬 0
+   [스크린샷](qa/p1d7_live_52_steep.png): 분해 표시한 4파트, 오버레이, 패널 "Gap 0.5 mm, 2 connector(s)".
+
+headless 적대 케이스(검증자 스크래치, 커밋 안 함): 컷 3개(Z + 경사 2개), 벽 8 mm 중공 박스(공동 관통 컷), 벽 3 mm 중공, L자(경사 컷 2개),
+0.6 mm 슬롯 — 모두 매니폴드·원본 밖 정점 0·파트 간 관입 0. 공동을 지나지 않는 컷은 공동을 유지(부피 42176 = 56000 − 24³).
+슬롯에 걸친 수동 커넥터는 경고와 함께 건너뜀. 이전 재현 3종(repro/steep/shallow) 관입 0.
+
+열린 항목:
+- [중간~낮음] D8: 벽 8 mm 중공 박스(핀 Ø5 + 클리어런스 + 벽이 들어갈 공간 있음)에 기본 설정(LINE 2개, margin 15 %) Distribute → 커넥터 0개
+  ("No connector fits"). LINE은 선 위 구간 중앙(v)만 고르고 u 방향 벽 위치를 찾지 않으며, 2D inset에서 걸러진 점은 dropped에도 세지 않는다.
+  수동 (−16, 0)은 정상 빌드. GRID 5×5도 0개.
+- [낮음] Distribute 경고 문구가 다른 컷 때문에 버린 경우에도 "would break through the surface"라고 표시.
+- [낮음] Build의 `max_step`(1 mm 샘플 간격) 전달을 지우는 뮤테이션은 테스트가 잡지 못함.
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
 | QA-5 컷 평면 모달 조정 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p1-mvp2: `--gui` p1_adjust_plane — 오버레이 주황, 드래그·휠·X·LMB·Esc, 실제 Ctrl+Z/Ctrl+Shift+Z, 모달 중 undo/redo, 파일 로드 `cancel()`. 사람 확인 남음: 드래그 감도, 오버레이 가독성 [5.2](qa/p1_adjust_plane_5.2.png) |
 | QA-6 Draft 패널 → Build → Export | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p1_panel — 실제 버튼 클릭(추가·undo/redo·체크박스·삭제·Distribute·Build·Export·Clear). 사람 확인 남음: 패널 배치·문구 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png). 라이브 5.2(MCP)에서는 확인하지 않음(사용자 세션 미사용 규칙) |
+| D7 수정 라이브(MCP) | — | PASS | 2026-10-09 verifier, develop ff7ecdb: QA5_Steep 옛 커넥터 Rebuild → 다른 컷 넘는 3개 경고·건너뜀, 재배치 후 경고 0·관입 0·외곽 밖 0. 열린 항목 D8(중공 벽에 자동 배치 0개) — 위 "D7 수정 라이브 검증" 절 |
 | P1 후속 수정 라이브(MCP) | — | PASS (새 결함 D7) | 2026-10-09 verifier, develop fafaed4: Unit Scale 0.001에서 1 unit = 1 mm, 경사 컷 재현 외곽 관통 0·경고 0·STL mm 확인. 가파른 경사 컷에서 핀이 세 번째 파트로 2.64 mm 관입(D7) — 위 "P1 후속 수정 라이브 검증" 절 |
 | P1 라이브(MCP) 검증 | — | PASS (결함 1건) | 2026-10-09 verifier, develop e148026: 재로드·validate·Z+경사(gap 0.5) 컷·커넥터 8·Build(4파트 매니폴드, 원본 해시 불변)·Easy Cut·STL Export(mm 확인). 경사 컷 자동 커넥터가 외곽 관통(중간) — 위 "P1 라이브 검증" 절 |
 | QA-1 분할 프리뷰 표시 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브, 애드온 재로드): 40 BU 큐브 Z/3파트 → 평면 2개(z=±6.667)가 Solid 뷰에서 **주황**으로 보임(`diffuse_color`=(1, 0.45, 0, 0.8), `show_in_front`) [fixed](qa/qa1_52_preview_z3_fixed.png); X/2파트 → X축 평면 1개; 끄면 평면·컬렉션 제거, X-Ray 원복, **고아 메쉬 0**(수정 전 8). 콘솔 오류 없음. `--gui` qa1_preview_color PASS(따뜻한 픽셀 0.0002→0.0593). 이전 결과(회색): [z3](qa/qa1_52_preview_z3.png) |
