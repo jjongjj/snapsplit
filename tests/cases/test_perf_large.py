@@ -65,3 +65,39 @@ def run(ctx):
     assert len(parts) == 3, [o.name for o in parts]
     for p in parts:
         assert lib.is_manifold(p), f"{p.name} not manifold after build"
+
+    # P2-7: curved (S) stroke cut on the same ~510k-face Suzanne, gap 0.3 mm, Distribute + Build
+    bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
+    lib.set_scene_mm()
+    monkey = lib.make_monkey_manifold(80.0)
+    mod = monkey.modifiers.new("subsurf", 'SUBSURF')
+    mod.levels = 5
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    lib.select_only([monkey])
+    import math
+    pts = [(-56.0 + 112.0 * i / 39, 0.0, 4.0 + 6.0 * math.sin(2 * math.pi * i / 39)) for i in range(40)]
+    t0 = time.perf_counter()
+    lib.run_op(bpy.ops.splitforge.stack_add_stroke, points=[{"name": "", "co": p} for p in pts],
+               direction=(0.0, 1.0, 0.0))
+    ctx.metric("stroke_add_s", round(time.perf_counter() - t0, 2))
+    cut = monkey.splitforge_stack.cuts[0]
+    cut.gap_mm = 0.3
+    cut.connector_count = 2
+    t0 = time.perf_counter()
+    lib.run_op(bpy.ops.splitforge.connector_add_auto)
+    ctx.metric("stroke_distribute_s", round(time.perf_counter() - t0, 2))
+    ctx.metric("stroke_connectors", len(cut.connectors))
+    build = ctx.module("cuts.build")
+    t0 = time.perf_counter()
+    result = build.build(bpy.context, monkey)
+    elapsed = time.perf_counter() - t0
+    ctx.metric("stroke_build_s", round(elapsed, 2))
+    ctx.metric("stroke_booleans", "; ".join(f"{label}={solver}({'/'.join(f'{a}:{s}s' for a, _r, s in att)})"
+                                           for label, solver, att in result.booleans))
+    assert not result.warnings, result.warnings
+    parts = [bpy.data.objects[n] for n in result.parts]
+    assert len(parts) == 2, result.parts
+    for p in parts:
+        assert lib.is_manifold(p), f"{p.name} not manifold after stroke build"
+    if bpy.app.version >= (5, 0, 0):
+        assert elapsed < 120.0, f"stroke build took {elapsed:.1f} s (limit 120 s on 5.2)"
