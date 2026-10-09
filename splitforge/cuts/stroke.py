@@ -202,18 +202,35 @@ def vertex_tangents(pts):
     return out
 
 
-def offset(pts, h):
-    """Polyline offset by ``h`` along the left normal (miter joins, limited)."""
+# Exact mitre joins: an offset vertex sits where the two offset segments meet (1 / cos(half the turn)
+# times the offset), so every offset segment stays exactly parallel to its segment and the gap slab
+# between the two offset ribbons is exactly gap x their mean length (the Build pair check relies on it).
+# A clamped mitre tilted whole segments of a sparse polyline and the gap shrank along them (defect D20).
+# Corners narrower than MIN_CORNER_DEG (their mitre would reach ~7.7 x the offset beyond the corner) are
+# refused when there is a gap.
+MIN_CORNER_DEG = 15.0
+MITER_LIMIT = 1.0 / math.sin(math.radians(MIN_CORNER_DEG - 0.1) * 0.5)
+
+
+def mitre_scales(pts):
+    """1 / cos(half the turn) at each vertex of an open polyline (1 at the ends)."""
     segs = [_unit((b[0] - a[0], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
     tans = vertex_tangents(pts)
+    out = [1.0]
+    for i in range(1, len(pts) - 1):
+        s0, t = segs[i - 1], tans[i]
+        cos_half = abs(s0[0] * t[0] + s0[1] * t[1])
+        out.append(1.0 / cos_half if cos_half > 1e-12 else math.inf)
+    return out + ([1.0] if len(pts) > 1 else [])
+
+
+def offset(pts, h):
+    """Polyline offset by ``h`` along the left normal (exact mitre joins, see MITER_LIMIT)."""
+    tans = vertex_tangents(pts)
     out = []
-    for i, (p, t) in enumerate(zip(pts, tans)):
+    for p, t, scale in zip(pts, tans, mitre_scales(pts)):
         n = (-t[1], t[0])
-        scale = 1.0
-        if 0 < i < len(pts) - 1:
-            s0 = segs[i - 1]
-            cos_half = max(abs(s0[0] * t[0] + s0[1] * t[1]), 0.25)
-            scale = 1.0 / cos_half
+        scale = min(scale, 1e6)
         out.append((p[0] + n[0] * h * scale, p[1] + n[1] * h * scale))
     return out
 
@@ -481,6 +498,7 @@ class StrokeCutter:
 
 # Polyline cuts reuse the stroke rules; their messages speak of clicked points
 _POLYLINE_WORDS = (("drag across the object", "place the points across the object"),
+                   ("widen the corner", "move the points to widen the corner"),
                    ("draw an open curve without loops", "place the points without loops"),
                    ("draw a smoother curve", "use wider corners"),
                    ("stroke", "polyline"))
@@ -534,6 +552,12 @@ def _build_cutter(points, direction, corners, gap=0.0):
         raise StrokeError("The straight extension beyond a stroke end crosses the stroke: "
                           "start and end the stroke heading away from the object")
     if half > 0.0:
+        sharpest = max(mitre_scales(pts))
+        if sharpest > MITER_LIMIT:
+            angle = 2.0 * math.degrees(math.asin(min(1.0, 1.0 / sharpest)))
+            raise StrokeError(f"A corner of the stroke is too sharp for a gap ({angle:.1f} degrees; with a gap "
+                              f"corners need at least {MIN_CORNER_DEG:g}): "
+                              "widen the corner or set the gap to 0")
         raw_plus, raw_minus = offset(pts, half), offset(pts, -half)
         plus, minus = extend_to_box(raw_plus, box), extend_to_box(raw_minus, box)
         if folded(pts, raw_plus) or folded(pts, raw_minus):

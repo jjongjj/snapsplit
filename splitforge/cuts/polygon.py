@@ -73,9 +73,8 @@ def edges_cross(poly):
     return False
 
 
-def offset_closed(poly, h):
-    """Closed polygon offset by ``h`` along the left normal of its edges (inward for a
-    counter-clockwise polygon), mitered with the same limit as stroke.offset."""
+def mitre_scales_closed(poly):
+    """1 / cos(half the turn) at each vertex of a closed polygon (exact mitre, stroke.MITER_LIMIT)."""
     n = len(poly)
     segs = [stroke._unit((poly[(i + 1) % n][0] - poly[i][0], poly[(i + 1) % n][1] - poly[i][1]))
             for i in range(n)]
@@ -83,11 +82,26 @@ def offset_closed(poly, h):
     for i in range(n):
         s0, s1 = segs[i - 1], segs[i]
         t = stroke._unit((s0[0] + s1[0], s0[1] + s1[1]))
+        cos_half = abs(s0[0] * t[0] + s0[1] * t[1]) if t != (0.0, 0.0) else 0.0
+        out.append(1.0 / cos_half if cos_half > 1e-12 else math.inf)
+    return out
+
+
+def offset_closed(poly, h):
+    """Closed polygon offset by ``h`` along the left normal of its edges (inward for a
+    counter-clockwise polygon), exact mitre joins like stroke.offset (defect D20)."""
+    n = len(poly)
+    segs = [stroke._unit((poly[(i + 1) % n][0] - poly[i][0], poly[(i + 1) % n][1] - poly[i][1]))
+            for i in range(n)]
+    out = []
+    for i, scale in enumerate(mitre_scales_closed(poly)):
+        s0, s1 = segs[i - 1], segs[i]
+        t = stroke._unit((s0[0] + s1[0], s0[1] + s1[1]))
         if t == (0.0, 0.0):
             t = s1
-        cos_half = max(abs(s0[0] * t[0] + s0[1] * t[1]), 0.25)
+        scale = min(scale, 1e6)
         nx, ny = -t[1], t[0]
-        out.append((poly[i][0] + nx * h / cos_half, poly[i][1] + ny * h / cos_half))
+        out.append((poly[i][0] + nx * h * scale, poly[i][1] + ny * h * scale))
     return out
 
 
@@ -215,6 +229,13 @@ def build_cutter(points, direction, corners, gap=0.0, depth=0.0):
         poly.reverse()
     half = max(gap, 0.0) * 0.5
     if half > 0.0:
+        sharpest = max(mitre_scales_closed(poly))
+        if sharpest > stroke.MITER_LIMIT:
+            angle = 2.0 * math.degrees(math.asin(min(1.0, 1.0 / sharpest)))
+            raise stroke.StrokeError(
+                f"A corner of the polygon is too sharp for a gap ({angle:.1f} degrees; with a gap corners need "
+                f"at least {stroke.MIN_CORNER_DEG:g}): widen the corner or "
+                "set the gap to 0")
         inner, outer = offset_closed(poly, half), offset_closed(poly, -half)
         if (_folded(poly, inner) or _folded(poly, outer) or edges_cross(inner) or edges_cross(outer)
                 or signed_area(inner) <= 0.0):
