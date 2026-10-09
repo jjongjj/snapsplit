@@ -41,6 +41,12 @@ class SPLITFORGE_UL_cuts(UIList):
             row.label(text="", icon='ERROR')
 
 
+def tr(template, **values):
+    """Translated label with values: the template (with {names}) is the msgid, so the dictionary can
+    reorder the values for a language."""
+    return iface(template).format(**values)
+
+
 # Short connector type names for the list (full names are the enum items)
 KIND_SHORT = {'CYL_PIN': "Pin", 'RECT_TENON': "Tenon", 'DOVETAIL': "Dovetail", 'SNAP_PIN': "Snap pin",
               'SNAP_TENON': "Snap tenon", 'SNAP_DOVETAIL': "Snap dovetail", 'CUSTOM': "Custom",
@@ -143,7 +149,7 @@ def draw_checks(context, layout, obj):
     scale_ok = validate.transform_is_applied(obj)
     mm_ok = units.is_mm_scene(context.scene)
     row.label(text="Transforms", icon='CHECKMARK' if scale_ok else 'ERROR')
-    row.label(text=f"1 unit = {units.bu_to_mm_factor(context.scene):g} mm",
+    row.label(text=tr("1 unit = {mm} mm", mm=f"{units.bu_to_mm_factor(context.scene):g}"), translate=False,
               icon='CHECKMARK' if mm_ok else 'INFO')
     row.operator(OP("validate"), text="", icon='VIEWZOOM')
 
@@ -186,7 +192,8 @@ def draw_draft(context, layout, stack):
     cut = stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
     box = layout.box()
     box.row().prop(cut, "name", text="")
-    box.label(text=f"Gap {cut.gap_mm:g} mm, {len(cut.connectors)} connector(s)")
+    box.label(text=tr("Gap {gap} mm, {n} connector(s)", gap=f"{cut.gap_mm:g}", n=len(cut.connectors)),
+              translate=False)
     row = box.row(align=True)
     row.prop(cut, "enabled")
     if cut.kind == 'STROKE':
@@ -198,7 +205,7 @@ def draw_draft(context, layout, stack):
             col.label(text="Cannot build this cut:", icon='ERROR')
             for line in _wrap(problem, 34):
                 col.label(text=line)
-        box.label(text=f"Stroke: {len(cut.points)} points", icon='CURVE_BEZCURVE')
+        box.label(text=tr("Stroke: {n} points", n=len(cut.points)), translate=False, icon='CURVE_BEZCURVE')
         op_row = box.row()
         op_row.operator_context = 'INVOKE_REGION_WIN'
         op_row.operator(OP("stack_add_stroke"), text="Redraw in Viewport",
@@ -241,7 +248,7 @@ class SPLITFORGE_PT_main(_Base, Panel):
         if active is not None and active != obj:
             # Built parts have no stack of their own: edits go to the source's stack
             col = layout.column(align=True)
-            col.label(text=f"Part of {obj.name}", icon='LINKED')
+            col.label(text=tr("Part of {name}", name=obj.name), translate=False, icon='LINKED')
             col.label(text="Editing the source's cuts")
         else:
             layout.label(text=obj.name, icon='OBJECT_DATA')
@@ -268,7 +275,7 @@ class SPLITFORGE_PT_connectors(_Base, Panel):
         _obj, stack = _owner_stack(context)
         cut = stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
         s = getattr(context.scene, naming.SCENE_SETTINGS)
-        layout.label(text=f"On {cut.name}")
+        layout.label(text=tr("On {name}", name=cut.name), translate=False)
 
         box = layout.box()
         box.label(text="New connectors")
@@ -315,7 +322,8 @@ class SPLITFORGE_PT_build(_Base, Panel):
         row.operator(OP("build"), text="Rebuild" if parts else "Build", icon='MOD_BUILD')
         row.operator(OP("clear_build"), text="", icon='X')
         if parts:
-            layout.label(text=f"{len(parts)} part(s) in {parts[0].users_collection[0].name}",
+            layout.label(text=tr("{n} part(s) in {collection}", n=len(parts),
+                                 collection=parts[0].users_collection[0].name), translate=False,
                          icon='OUTLINER_COLLECTION')
         s = getattr(context.scene, naming.SCENE_SETTINGS)
         col = layout.column(align=True)

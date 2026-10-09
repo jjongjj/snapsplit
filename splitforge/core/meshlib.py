@@ -105,20 +105,29 @@ _WINDING_SKEW = (7.31e-4, 5.27e-4)
 
 
 class _Triangles:
-    """Triangles of a bmesh (loop triangles) with a BVH, their face, corners and normals."""
+    """A triangulated copy of a bmesh with a BVH (its indices are the triangles') and, per triangle on
+    demand, its corners (coordinates and vertex indices). Call free() when done."""
 
     def __init__(self, bm):
         from mathutils.bvhtree import BVHTree
-        bm.verts.index_update()
-        bm.faces.index_update()
-        loops = bm.calc_loop_triangles()
-        self.coords = [v.co.copy() for v in bm.verts]
-        self.tris = [tuple(l.vert.index for l in t) for t in loops]
-        self.face = [t[0].face.index for t in loops]
-        self.corners = [frozenset(v.index for v in f.verts) for f in bm.faces]
-        self.normals = [(self.coords[b] - self.coords[a]).cross(self.coords[c] - self.coords[a])
-                        for a, b, c in self.tris]
-        self.bvh = BVHTree.FromPolygons(self.coords, self.tris, all_triangles=True) if self.tris else None
+        self.bm = bm.copy()
+        if any(len(f.verts) != 3 for f in self.bm.faces):
+            bmesh.ops.triangulate(self.bm, faces=self.bm.faces[:])
+        self.bm.verts.index_update()
+        self.bm.faces.ensure_lookup_table()
+        self.bvh = BVHTree.FromBMesh(self.bm) if self.bm.faces else None
+        self._cache = {}
+
+    def face(self, index):
+        """((a, b, c) coordinates, corner vertex index set) of triangle ``index``."""
+        hit = self._cache.get(index)
+        if hit is None:
+            vs = self.bm.faces[index].verts
+            hit = self._cache[index] = (tuple(v.co.copy() for v in vs), frozenset(v.index for v in vs))
+        return hit
+
+    def free(self):
+        self.bm.free()
 
 
 def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, tris=None):
@@ -149,7 +158,12 @@ def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, tris=None):
     du, dw = (maxs[u] - mins[u]) / grid, (maxs[w] - mins[w]) / grid
     if du <= 0.0 or dw <= 0.0:
         return 0.0
-    tris = tris if tris is not None else _Triangles(bm)
+    if tris is None:
+        tris = _Triangles(bm)
+        try:
+            return winding_volume(bm, grid, bounds, axis, tris)
+        finally:
+            tris.free()
     if tris.bvh is None:
         return 0.0
     scale = max(maxs[k] - mins[k] for k in range(3)) or 1e-9
@@ -174,24 +188,24 @@ def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, tris=None):
             bases.append(base)
     rays = BVHTree.FromPolygons(strip_verts, strips, all_triangles=True)
     hits = {}
-    for ray, tri in rays.overlap(tris.bvh):
-        a, b, c = (tris.coords[x] for x in tris.tris[tri])
+    for ray, index in rays.overlap(tris.bvh):
+        (a, b, c), _corners = tris.face(index)
         p = intersect_ray_tri(a, b, c, direction, bases[ray], False)
         if p is None:
             continue
-        facing = tris.normals[tri].dot(direction)
+        facing = (b - a).cross(c - a).dot(direction)
         if abs(facing) < 1e-18:
             continue
-        hits.setdefault(ray, []).append(((p - bases[ray]).dot(direction), -1 if facing > 0.0 else 1, tri))
+        hits.setdefault(ray, []).append(((p - bases[ray]).dot(direction), -1 if facing > 0.0 else 1, index))
     eps = 1e-6 * scale
     total = 0.0
     for crossings in hits.values():
         crossings.sort()
         winding, inside_from, length = 0, None, 0.0
         kept = []
-        for t, sign, tri in crossings:
-            face = tris.face[tri]
-            if any(abs(t - t2) < eps and sign == s2 and (face == f2 or not tris.corners[face].isdisjoint(tris.corners[f2]))
+        for t, sign, face in crossings:
+            if any(abs(t - t2) < eps and sign == s2
+                   and (face == f2 or not tris.face(face)[1].isdisjoint(tris.face(f2)[1]))
                    for t2, s2, f2 in kept[-4:]):
                 continue          # the same crossing through a shared edge / vertex (or two triangles of one face)
             kept.append((t, sign, face))
@@ -212,7 +226,10 @@ def winding_volumes(bm, bounds=None, grid=WINDING_GRID):
         return (0.0, 0.0, 0.0)
     bounds = bounds if bounds is not None else bm_box(bm)
     tris = _Triangles(bm)
-    return tuple(winding_volume(bm, grid, bounds, axis, tris) for axis in range(3))
+    try:
+        return tuple(winding_volume(bm, grid, bounds, axis, tris) for axis in range(3))
+    finally:
+        tris.free()
 
 
 def bm_box(bm):
