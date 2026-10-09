@@ -188,6 +188,9 @@ def run(ctx):
             (c.kind, c.u) for c in cut.connectors]
         result = build.build(bpy.context, cube)
         assert not result.warnings, (kind, result.warnings)
+        # A connector's own overlapping solids (snap bumps, custom offset) are united first, so the
+        # part booleans need no self-intersection handling
+        assert all(b[1] == 'EXACT' for b in result.booleans), (kind, result.booleans)
         parts = parts_of(name)
         expect = {"A", "B"} | ({"Dowel_1", "Dowel_2"} if kind == 'DOWEL' else set())
         assert set(parts) == expect, (kind, sorted(parts))
