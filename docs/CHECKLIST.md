@@ -65,6 +65,7 @@
   검증: `test_placement.py` — 단위 프레임에서 (u=5,v=0) → 월드 x=5; 프레임 회전 90° → 대응 좌표. 자동 LINE 3개·margin 10% 위치가 시임 폭 내부. PASS. `grep -rn "def distribute_points" splitforge/connectors | wc -l` → `1`.
   결과: PASS 4.5/5.2. 자동 배치는 **시임 영역별**: 다른 컷이 시임을 나누면 영역마다 count개(다른 컷 평면 위에 커넥터가 놓이던 문제를 GUI에서 발견해 수정).
   추가(fix/p1-followups, 결함 D1): 자동 배치는 시임 영역을 커넥터 도달 거리(반경+클리어런스+벽 0.4 mm)만큼 줄이고, 핀·소켓 전체(컷 법선 방향 깊이 포함, 핀 쪽 A/B 모두)를 원본 안에서 3D 검사해 안쪽으로 옮기거나 버리며 경고한다; Build는 표면을 뚫는 커넥터를 경고와 함께 건너뛴다. 검증: `test_connectors_fit.py` — 경사 컷(원점 (3,0,0), 법선 (1,0.6,0.35), gap 0.5) 커넥터 전부 벽 0.4 mm 이상, 빌드 경고 0, 파트 정점이 원본 큐브 밖 0, 가장자리 수동 커넥터는 건너뜀+경고, 옮긴 커넥터끼리 간격 유지. PASS 4.5/5.2.
+  독립 검증(2026-10-09, verifier, develop fafaed4): `--gui` 10시나리오 ×2 PASS, 헤드리스 25/25 ×2 PASS, `--slow` PASS(5.2: split 5.03 s, connectors 14.33 s, build 9.56 s), 뮤테이션(fit 무력화·Build 건너뛰기 제거·3D fit 제거·단위 스케일·float32 반올림·옛 규약·export/FBX 스케일) 검출, inset 제거·간격 규칙 제거는 미검출(3D fit이 대신 잡음/간격 테스트 약함). 라이브 5.2 PASS. 열린 결함 D7: 다른 컷을 넘어 세 번째 파트로 핀 관입(가파른 경사 컷), MANUAL_QA 참고.
 - [x] **P1-9 connectors/apply.py (핀/소켓)**: CYL_PIN·RECT_TENON에 대해 핀 UNION(pin_side 파트), 소켓 DIFFERENCE(반대 파트, 반경+클리어런스, 깊이+클리어런스). 컷당 커넥터 N개를 커터 join 후 **파트당 불리언 1회**.
   검증: `test_connectors_build.py` — 큐브 Z컷 + CYL_PIN 3개 빌드 → 양 파트 매니폴드, 핀 파트 부피 > 반쪽 부피, 소켓 파트 부피 < 반쪽 부피; `pin_side` 바꾸면 반대. 클리어런스 0.3mm 시 소켓 지름 = 핀 지름+0.6 (단면 bbox로 측정, 허용 0.02mm). PASS.
   결과: PASS 4.5/5.2(소켓 지름 5.6±0.02, 깊이 5.3, RECT_TENON 6.5×4.5, gap 1 mm, 겹친 커넥터, 불리언 호출 수 = 파트당 UNION 1·DIFFERENCE 1).

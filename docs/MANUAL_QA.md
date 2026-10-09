@@ -200,12 +200,35 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
 
 ---
 
+## P1 후속 수정 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop fafaed4)
+
+독립 검증자(verifier), 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa5/`, 같은 안전 규칙(MCP undo·참조 보관·타이머·프리퍼런스 리셋 없음).
+
+1. 재로드(`qa5/reload.py`): disable → `bl_ext.splitforge_dev.splitforge*` 39개 `sys.modules` 삭제 → enable. 새 `connectors/fit.py` 로드, `units.LENGTH_UNIT_MM` 없음(새 규약).
+2. 씬 Metric + Millimeters + **Unit Scale 0.001** → `bu_to_mm_factor` 1.0, validate "Mesh is ready: … 1 unit = 1 mm", `mm_per_unit` 1.0.
+3. 재현(`qa5/scenario.py`, 40 mm 큐브 y=100): Z −5 + 경사 컷(origin (3,0,0), normal (1,0.6,0.35), gap 0.5) → Distribute
+   "3 connector(s) on Cut Z", "4 connector(s) on Cut 2, 4 moved inward to fit" → Build 경고 0, 4파트 매니폴드, 원본 해시 불변,
+   **모든 파트 정점이 큐브(±20 mm) 안(최대 바깥 0.0)**, 파트 간 상호 관입(레이 패리티) 없음, 고아 메쉬 0.
+   외면 돌기·구멍 없음(이전 QA4 큐브와 나란히) [파트](qa/p1f_live_52_parts.png).
+4. 패널: "Part of QA5_Repro / Editing the source's cuts", "1 unit = 1 mm", 컷 목록 "Cut Z"/"Cut 2" 잘림 없음, "Gap 0.5 mm, 4 connector(s)",
+   Origin X **3 mm**(이전 "3000 mm"), 커넥터 목록 "1 Pin pin A", "Pin on A (+N)" [패널](qa/p1f_live_52_panel.png).
+5. Export STL(`qa5/out/stl`) → WSL 파싱: 좌표 mm(bbox x −20..20, y 80..120, z −20..20), 부피 합 62886.3 mm³ = Blender 값.
+
+결과: 후속 수정(단위·D1 외곽·D3–D6) PASS. **새 결함(D7, 중간~높음)**: 가파른 경사 컷(`QA5_Steep`: Z −6 + normal (1,0.2,1.2),
+origin (0,0,2), gap 0.5)에서 Z 컷 커넥터 1의 핀(AA 쪽, 중심 (16.4,−14,−6))이 경사 컷 너머 세 번째 파트 BB 안으로 최대 2.64 mm 들어간다
+(BB에는 소켓 없음 → 조립 불가). `fit.worst_depth`는 원본 외곽만 검사하고 다른 컷의 시임/갭은 보지 않으며, 2D inset은 시임 평면에서만
+적용되어 핀의 법선 방향 길이와 기울어진 다른 컷 평면을 고려하지 않는다. headless 재현은 같은 장면(검증자 스크래치 케이스).
+빌드 경고 없음. 제안: 핀·소켓 샘플을 원본 대신 컷 후 조각(pin 조각 ∪ socket 조각) 기준으로 검사.
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
 | QA-5 컷 평면 모달 조정 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p1-mvp2: `--gui` p1_adjust_plane — 오버레이 주황, 드래그·휠·X·LMB·Esc, 실제 Ctrl+Z/Ctrl+Shift+Z, 모달 중 undo/redo, 파일 로드 `cancel()`. 사람 확인 남음: 드래그 감도, 오버레이 가독성 [5.2](qa/p1_adjust_plane_5.2.png) |
 | QA-6 Draft 패널 → Build → Export | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p1_panel — 실제 버튼 클릭(추가·undo/redo·체크박스·삭제·Distribute·Build·Export·Clear). 사람 확인 남음: 패널 배치·문구 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png). 라이브 5.2(MCP)에서는 확인하지 않음(사용자 세션 미사용 규칙) |
+| P1 후속 수정 라이브(MCP) | — | PASS (새 결함 D7) | 2026-10-09 verifier, develop fafaed4: Unit Scale 0.001에서 1 unit = 1 mm, 경사 컷 재현 외곽 관통 0·경고 0·STL mm 확인. 가파른 경사 컷에서 핀이 세 번째 파트로 2.64 mm 관입(D7) — 위 "P1 후속 수정 라이브 검증" 절 |
 | P1 라이브(MCP) 검증 | — | PASS (결함 1건) | 2026-10-09 verifier, develop e148026: 재로드·validate·Z+경사(gap 0.5) 컷·커넥터 8·Build(4파트 매니폴드, 원본 해시 불변)·Easy Cut·STL Export(mm 확인). 경사 컷 자동 커넥터가 외곽 관통(중간) — 위 "P1 라이브 검증" 절 |
 | QA-1 분할 프리뷰 표시 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브, 애드온 재로드): 40 BU 큐브 Z/3파트 → 평면 2개(z=±6.667)가 Solid 뷰에서 **주황**으로 보임(`diffuse_color`=(1, 0.45, 0, 0.8), `show_in_front`) [fixed](qa/qa1_52_preview_z3_fixed.png); X/2파트 → X축 평면 1개; 끄면 평면·컬렉션 제거, X-Ray 원복, **고아 메쉬 0**(수정 전 8). 콘솔 오류 없음. `--gui` qa1_preview_color PASS(따뜻한 픽셀 0.0002→0.0593). 이전 결과(회색): [z3](qa/qa1_52_preview_z3.png) |
 | QA-2 모달 분할 위치 조정 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브): 프리뷰 끈 상태로 Adjust 실행 중 오프셋을 5번 바꿔도 평면이 삭제·재생성되지 않고 **고아 메쉬 0**(수정 전 17), 파일 로드 `cancel()` 후 모달·X-Ray·`_ADJUST_RUNNING` 정리, 이후 프리뷰 갱신 정상. 드래그(4×25 px → +2.0 mm, 평면 동일 위치)·좌클릭/Enter 확정·Esc 취소는 `--gui` qa2_adjust(4.5/5.2) PASS로 확인. 오프셋으로 Planar Split 높이 일치·캡은 이전 라이브 확인. 사람 확인 남음: 실제 장치의 드래그 감도 |
