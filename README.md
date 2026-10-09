@@ -157,7 +157,10 @@ an error naming the path.
   not the diverging rays.
 - Polygon cuts take connectors only on the floor of a cut-out with a Depth, not on their walls.
 - With a gap, polyline and polygon corners must be at least 15 degrees (sharper ones are refused with
-  the reason; without a gap any corner works). A polygon cut-out must be at least 0.5 mm across.
+  the reason; without a gap any corner works). A polygon cut-out must be at least 0.5 mm across and
+  0.2 mm deep, and on very large objects remove at least 2 millionths of the object's bounding box volume
+  (the boolean result check cannot tell less from float noise: 250 mm^3 on a 500 mm cube, 16,000 mm^3 on
+  a 2 m one).
 - Connectors on a polyline keep away from its corners; on a stroke from tight bends.
 - The custom socket cache lives for the session only (recomputed after reopening the file; a second or
   two for non-convex meshes, instant for convex ones).

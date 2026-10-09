@@ -427,3 +427,16 @@ p3_connector_click 21.7 s, p3_connector_types 10.0 s, **p4_points 36.1 s**(40 �
 p3_connector_click 21.7 s, p3_connector_types 10.0 s, p4_points 36.1 s, p4_fix 126.2 s), `--slow test_perf_large`(514 560면) PASS:
 평면 Auto 13.81 / Accurate 50.32 s, 타입 13.94 / 47.44 s, S자 9.10 / 43.83 s, 폴리라인+폴리곤 11.30 / 46.92 s(< 120 s).
 `extension validate` 성공, `extension build` → `dist/splitforge-0.4.1.zip`(44파일, 155 950 B, tests·pycache 없음).
+
+### D22 (검증자, 0.4.1 거부 사유): 큰 오브젝트의 정상 포켓 거부
+
+- [x] **D22**: D21의 부피 규칙(`면적 × 두께 ≥ 1e-5 × bbox 부피`)이 오브젝트 크기에 비례해 300 mm 큐브 4×4×10·6×6×5, 500 mm 큐브 10×10×5,
+  40 mm 큐브 1×1×0.5 포켓까지 거부(잘못된 문구 "0.5 mm across"), 0.4.0 파일의 그런 포켓은 Build 실패. 수정: 규칙 셋, 각자 문구 —
+  폭(절대, 2 × 면적 / 둘레 ≥ 0.25 mm: "too narrow to cut out (… mm across)"), 깊이(절대 ≥ 0.2 mm: "too shallow"), 부피(불리언 결과 검사가
+  실제로 쓰는 허용치에 맞춤: 제거 부피 ≥ 2 × `VOLUME_TOLERANCE`(1e-6) × bbox 부피 — 500 mm 큐브 250 mm³, "too small for an object this large
+  (… mm^3; the booleans need at least … mm^3 here)"). 검증: `test_polygon_cut.py` — 300 mm 4×4×10(160)·6×6×5(180), 500 mm 10×10×5(500),
+  40 mm 1×1×0.5(0.5) 모두 EXACT×2 빌드·플러그 부피 1e-3; 0.4.0 방식으로 저장된 500 mm 큐브 포켓은 패널 문제 없음·빌드; 0.01/0.2/0.49 mm
+  정사각형 "too narrow", 깊이 0.1 "too shallow", 2 m 큐브 1×1×1 "too small for an object this large".
+  결과(2026-10-10, fix/p4-d22, 5.2.2): 헤드리스 44/44 PASS, `--zip dist/splitforge-0.4.1.zip`(44파일, 156 341 B) 44/44 + 설치 검사 PASS,
+  `--gui p4_points` PASS(36.1 s), `extension validate`/`build` 성공. 뮤테이션 5/5 검출(이전 상대 규칙 복원, 부피·깊이·폭 규칙 끔, 폭을
+  오브젝트 크기에 비례). 버전은 0.4.1 유지(0.4.1은 아직 릴리스되지 않음; CHANGELOG 항목 갱신).
