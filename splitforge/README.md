@@ -56,15 +56,15 @@ The maintainer reports successful testing with:
 
 Please report your results with other Blender versions, including the SnapSplit version and the workflow you tested.
 
-**Metadata note:** The current extension manifest declares Blender 4.2.0 as the minimum version, while the legacy `bl_info` metadata specifies Blender 5.2.0. These declarations are not a guarantee that every intervening version has been tested.
+**Metadata note:** The extension manifest (and `bl_info`) declare Blender 4.2.0 as the minimum version. SplitForge is tested automatically on Blender 4.5 LTS and 5.2 LTS; the declaration is not a guarantee that every intervening version has been tested.
 
 ### Installation
 
-1. Download the packaged SnapSplit release ZIP.
+1. Download the packaged SplitForge release ZIP (extension id `splitforge`).
 2. In Blender, open **Edit → Preferences → Add-ons**.
 3. Open the add-on menu and choose **Install from Disk…**.
-4. Select the SnapSplit ZIP and complete the installation.
-5. Enable SnapSplit if it is not enabled automatically.
+4. Select the SplitForge ZIP and complete the installation.
+5. Enable SplitForge if it is not enabled automatically.
 
 The exact installation controls may vary slightly between Blender versions.
 
@@ -72,13 +72,19 @@ If you download the repository rather than a packaged release, create an extensi
 
 ### Blender setup
 
-Recommended scene settings:
+Recommended scene settings (the usual 3D-print setup, 1 Blender unit = 1 mm):
 
 - **Unit System:** Metric
-- **Unit Scale:** 1.000
-- **Length:** Adaptive
+- **Unit Scale:** 0.001
+- **Length:** Millimeters
 
-Open the **3D Viewport sidebar** with **N**, then select the **SnapSplit** tab.
+SplitForge reads millimeters exactly as Blender displays them (1 unit = Unit Scale × 1000 mm),
+so with other settings the add-on's mm values still match the viewport; the panel shows the
+effective "1 unit = … mm" and exported STL/OBJ files are always written in millimeters.
+
+Open the **3D Viewport sidebar** with **N**, then select the **SplitForge** tab. The new
+Draft/Easy workflow is the main panel; the original SnapSplit tools are in its collapsed
+**Legacy** sub-panel.
 
 ### Mesh preparation and quality checks
 

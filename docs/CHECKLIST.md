@@ -35,11 +35,16 @@
 전역 설정 `Scene.splitforge`, 파트 프로퍼티 `["splitforge_source"]`·`["splitforge_cut_ids"]`, 결과 컬렉션 `SplitForge_Build_<obj>`,
 패키지 폴더 `splitforge/`(이름은 `splitforge/core/naming.py`에 중앙화). 레거시 `snapsplit.*`·`Scene.snapsplit`는 유지.
 
-- [x] **P1-1 core/units.py**: `mm_to_scene`/`scene_to_mm`가 `scale_length`와 `length_unit`(mm/cm/m/inch) 전부 반영.
-  검증: `test_units.py` 확장 — mm 씬 1.0, m 씬(scale 1) 0.001, cm 씬 0.1, scale_length 0.001+m 씬 1.0, imperial inch 1/25.4 (허용 1e-9). PASS.
-  결과(2026-10-09, feat/p1-mvp2): PASS 4.5/5.2(+ ADAPTIVE·NONE 케이스). `scale_length`는 float32라 7자리 유효숫자로 반올림(0.001 → 0.0010000000475 보정). **사용자 결정 필요**: 이 규약(1 BU = length_unit × scale_length)은 Blender 자체 표시(1 BU = scale_length m)와 Meters 외에는 다르다(mm+1.0 씬에서 40 BU 큐브가 N 패널에 40000 mm로 표시).
-- [x] **P1-2 core/validate.py**: `validate(obj) -> ValidationReport(manifold, loose_geom, transform_applied, unit_is_mm, messages)`.
-  검증: `test_validate.py` — 큐브 OK; 면 하나 삭제한 큐브 `manifold=False`; scale 2 큐브 `transform_applied=False`; m 씬 `unit_is_mm=False`. PASS.
+- [x] **P1-1 core/units.py**: `mm_to_scene`/`scene_to_mm`가 Blender 표시 규약을 따른다: **1 BU = `scale_length` m**
+  (`length_unit`은 표시만 바꿈). 애드온의 mm 값은 항상 Blender가 mm로 보여 주는 값과 같다(2026-10-09 사용자 결정).
+  검증: `test_units.py` — mm 단위 +Unit Scale 0.001 → mm당 1.0 BU(표준 3D 프린트 설정), m+0.001 1.0, m+1.0 0.001,
+  mm+1.0 0.001(Blender가 40 BU를 40000 mm로 표시), cm+0.01 0.1, inch+0.0254 1/25.4, ADAPTIVE/NONE 0.001 (허용 1e-9),
+  각 설정에서 Blender 자체 변환(`bpy.utils.units.to_value("25 mm") / scale_length`)과 일치. PASS.
+  결과(2026-10-09, fix/p1-followups): PASS 4.5/5.2. `scale_length`는 float32라 7자리 유효숫자로 반올림. 모든 테스트 씬은
+  표준 설정(Millimeters + Unit Scale 0.001, 40 BU = 40 mm 큐브). (feat/p1-mvp2의 "1 BU = length_unit × scale_length" 규약은 폐기)
+- [x] **P1-2 core/validate.py**: `validate(obj) -> ValidationReport(manifold, loose_geom, transform_applied, unit_is_mm, mm_per_unit, messages)`.
+  검증: `test_validate.py` — 큐브 OK; 면 하나 삭제한 큐브 `manifold=False`; scale 2 큐브 `transform_applied=False`; m 씬(Unit Scale 1) `unit_is_mm=False`, `mm_per_unit=1000`과 메시지. PASS.
+  패널은 항상 실제 "1 unit = … mm"를 표시.
   결과: PASS 4.5/5.2(+ 느슨한 정점 `loose_geom`, 위치만 이동한 큐브는 transform OK, 비메시 오브젝트).
 - [x] **P1-3 model/props.py**: `SPLITFORGE_PG_Connector`, `SPLITFORGE_PG_Cut`, `SPLITFORGE_PG_CutStack`(+ `SPLITFORGE_PG_Settings`) 등록, `Object.splitforge_stack`.
   검증: `test_model.py` — 큐브에 컷 2개·커넥터 3개 추가 → `.blend` 저장 → `wm.open_mainfile` 후 값 동일. 등록/해제 반복 3회 예외 없음. PASS.
@@ -59,6 +64,7 @@
 - [x] **P1-8 connectors/placement.py**: 시임 프레임(origin, normal, tangent) + (u,v,rot) → 월드 행렬. 단일 함수가 자동/클릭/프리뷰 모두에 쓰임.
   검증: `test_placement.py` — 단위 프레임에서 (u=5,v=0) → 월드 x=5; 프레임 회전 90° → 대응 좌표. 자동 LINE 3개·margin 10% 위치가 시임 폭 내부. PASS. `grep -rn "def distribute_points" splitforge/connectors | wc -l` → `1`.
   결과: PASS 4.5/5.2. 자동 배치는 **시임 영역별**: 다른 컷이 시임을 나누면 영역마다 count개(다른 컷 평면 위에 커넥터가 놓이던 문제를 GUI에서 발견해 수정).
+  추가(fix/p1-followups, 결함 D1): 자동 배치는 시임 영역을 커넥터 도달 거리(반경+클리어런스+벽 0.4 mm)만큼 줄이고, 핀·소켓 전체(컷 법선 방향 깊이 포함, 핀 쪽 A/B 모두)를 원본 안에서 3D 검사해 안쪽으로 옮기거나 버리며 경고한다; Build는 표면을 뚫는 커넥터를 경고와 함께 건너뛴다. 검증: `test_connectors_fit.py` — 경사 컷(원점 (3,0,0), 법선 (1,0.6,0.35), gap 0.5) 커넥터 전부 벽 0.4 mm 이상, 빌드 경고 0, 파트 정점이 원본 큐브 밖 0, 가장자리 수동 커넥터는 건너뜀+경고, 옮긴 커넥터끼리 간격 유지. PASS 4.5/5.2.
 - [x] **P1-9 connectors/apply.py (핀/소켓)**: CYL_PIN·RECT_TENON에 대해 핀 UNION(pin_side 파트), 소켓 DIFFERENCE(반대 파트, 반경+클리어런스, 깊이+클리어런스). 컷당 커넥터 N개를 커터 join 후 **파트당 불리언 1회**.
   검증: `test_connectors_build.py` — 큐브 Z컷 + CYL_PIN 3개 빌드 → 양 파트 매니폴드, 핀 파트 부피 > 반쪽 부피, 소켓 파트 부피 < 반쪽 부피; `pin_side` 바꾸면 반대. 클리어런스 0.3mm 시 소켓 지름 = 핀 지름+0.6 (단면 bbox로 측정, 허용 0.02mm). PASS.
   결과: PASS 4.5/5.2(소켓 지름 5.6±0.02, 깊이 5.3, RECT_TENON 6.5×4.5, gap 1 mm, 겹친 커넥터, 불리언 호출 수 = 파트당 UNION 1·DIFFERENCE 1).
@@ -73,7 +79,7 @@
   결과: `test_ui_draw` PASS 4.5/5.2. GUI: `python3 tests/run_tests.py --gui`의 `p1_panel`(실제 버튼 클릭)·`p1_adjust_plane` PASS 4.5/5.2. 스크린샷 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png), 모달 [4.5](qa/p1_adjust_plane_4.5.png) [5.2](qa/p1_adjust_plane_5.2.png).
 - [x] **P1-13 회귀**: 레거시 케이스(P0-5) 포함 전체 PASS, 두 버전.
   검증: `python3 tests/run_tests.py` exit 0.
-  독립 검증(2026-10-09, verifier, develop e148026): 헤드리스 24/24 ×2회 PASS(4.5.5/5.2.2), `--gui` 10시나리오 ×2버전 PASS, `--slow test_perf_large` PASS(5.2: split 4.54 s, connectors 12.97 s, build 9.16 s), 뮤테이션 13건 전부 테스트가 검출, `extension validate` 성공, 라이브 5.2 MCP PASS(MANUAL_QA "P1 라이브 검증"). 열린 결함: 경사 컷 자동 커넥터가 외곽 관통(P1-8 범위 밖, 중간).
+  독립 검증(2026-10-09, verifier, develop e148026): 헤드리스 24/24 ×2회 PASS(4.5.5/5.2.2), `--gui` 10시나리오 ×2버전 PASS, `--slow test_perf_large` PASS(5.2: split 4.54 s, connectors 12.97 s, build 9.16 s), 뮤테이션 13건 전부 테스트가 검출, `extension validate` 성공, 라이브 5.2 MCP PASS(MANUAL_QA "P1 라이브 검증"). 열린 결함: 경사 컷 자동 커넥터가 외곽 관통(P1-8 범위 밖, 중간) → fix/p1-followups에서 수정(아래 P1-8 추가 기준).
   결과: 헤드리스 24/24 PASS ×2회(4.5/5.2), `--gui` 10개 시나리오 PASS(4.5/5.2), `--slow --case test_perf_large` PASS(5.2: split 4.87 s, connectors 14.11 s, 새 Build 9.27 s).
 
 ## Phase 2 — 곡선 컷 + 불리언 폴백 + 진행률

@@ -17,6 +17,7 @@ class ValidationReport:
     loose_geom: bool = False
     transform_applied: bool = True
     unit_is_mm: bool = True
+    mm_per_unit: float = 1.0          # effective millimeters per Blender unit (1000 x Unit Scale)
     messages: list = field(default_factory=list)
 
     @property
@@ -74,8 +75,9 @@ def validate(obj, scene=None, check_mesh=True):
 
     if scene is None and obj.users_scene:
         scene = obj.users_scene[0]
+    rep.mm_per_unit = units.bu_to_mm_factor(scene)
     if not units.is_mm_scene(scene):
         rep.unit_is_mm = False
-        rep.messages.append(
-            f"Scene unit is not millimeters (1 unit = {units.bu_to_mm_factor(scene):g} mm)")
+        rep.messages.append(f"1 unit = {rep.mm_per_unit:g} mm "
+                            f"(Unit Scale 0.001 makes 1 unit = 1 mm, the usual 3D-print setup)")
     return rep

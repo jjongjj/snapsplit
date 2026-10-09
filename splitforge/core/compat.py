@@ -55,8 +55,13 @@ def export_formats():
 def export_selected(fmt, filepath, global_scale):
     """Export the selected objects of the current context to ``filepath``.
 
-    Modifiers are applied, Z is up and -Y forward (Blender's own axes, what
-    slicers expect), materials are not written.
+    Coordinates are written unchanged: forward 'Y' + up 'Z' is the identity
+    mapping for all three exporters (file X/Y/Z = Blender world X/Y/Z, Z up,
+    what slicers expect; tests/cases/test_export.py checks the raw STL/OBJ
+    values). ``global_scale`` multiplies the coordinates (STL/OBJ are unitless,
+    so passing the mm-per-unit factor writes millimeters); FBX is written in
+    its own centimeter unit with the same physical size. Modifiers are
+    applied, materials are not written.
     """
     if fmt == 'STL':
         return bpy.ops.wm.stl_export(
@@ -71,6 +76,7 @@ def export_selected(fmt, filepath, global_scale):
     if fmt == 'FBX':
         # FBX stores centimeters (UnitScaleFactor 1) and the exporter multiplies by 100
         # without unit scaling: global_scale / 1000 makes 1 mm come out as 0.1 cm.
+        # (axis_forward 'Y' / axis_up 'Z' keep Blender's axes, like forward_axis/up_axis above.)
         return bpy.ops.export_scene.fbx(
             filepath=filepath, use_selection=True, global_scale=global_scale / 1000.0,
             apply_unit_scale=False, apply_scale_options='FBX_SCALE_NONE', object_types={'MESH'},

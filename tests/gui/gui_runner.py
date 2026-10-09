@@ -12,8 +12,8 @@ processes every event (and mouse_prev) like real input. Each scenario records ch
 in a JSON report, saves viewport screenshots to ``--shots`` and quits Blender.
 A crash (no report / non-zero exit code / blender.crash.txt) is a FAIL in run_tests.py.
 
-Units follow the harness convention (Metric, Millimeters, Unit Scale 1.0, 1 BU = 1 mm
-for the add-on, see docs/MANUAL_QA.md): the cube is 40 BU.
+Units follow the standard 3D-print setup (Metric, Millimeters, Unit Scale 0.001, so
+1 BU = 1 mm in Blender and in the add-on, see docs/MANUAL_QA.md): the cube is 40 BU = 40 mm.
 
 Scenarios
     qa1_preview_color  QA-1: split preview planes are orange in Solid view
@@ -303,7 +303,7 @@ def setup_scene_mm():
     units = bpy.context.scene.unit_settings
     units.system = 'METRIC'
     units.length_unit = 'MILLIMETERS'
-    units.scale_length = 1.0
+    units.scale_length = 0.001
 
 
 def setup_cube(overlays=False):

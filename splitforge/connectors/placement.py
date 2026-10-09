@@ -65,16 +65,53 @@ def line_intervals(loops, axis, value):
     return [(hits[i], hits[i + 1]) for i in range(0, len(hits) - 1, 2)]
 
 
-def _spread(lo, hi, count, margin_pct):
+def edge_distance(point, loops):
+    """Distance of a 2D point to the nearest loop edge."""
+    px, py = point
+    best = math.inf
+    for loop in loops:
+        n = len(loop)
+        for i in range(n):
+            (x0, y0), (x1, y1) = loop[i], loop[(i + 1) % n]
+            dx, dy = x1 - x0, y1 - y0
+            ll = dx * dx + dy * dy
+            f = 0.0 if ll == 0.0 else max(0.0, min(1.0, ((px - x0) * dx + (py - y0) * dy) / ll))
+            best = min(best, math.hypot(px - (x0 + f * dx), py - (y0 + f * dy)))
+    return best
+
+
+def fits_2d(point, loops, inset=0.0):
+    """Inside the material (even-odd) and at least ``inset`` away from every edge."""
+    return meshlib.point_in_polys_2d(point, loops) and edge_distance(point, loops) >= inset
+
+
+def area_centroid(loop):
+    """Area centroid of a closed 2D loop (vertex mean for degenerate loops)."""
+    a = cx = cy = 0.0
+    n = len(loop)
+    for i in range(n):
+        (x0, y0), (x1, y1) = loop[i], loop[(i + 1) % n]
+        c = x0 * y1 - x1 * y0
+        a += c
+        cx += (x0 + x1) * c
+        cy += (y0 + y1) * c
+    if abs(a) < 1e-12:
+        return sum(p[0] for p in loop) / n, sum(p[1] for p in loop) / n
+    return cx / (3.0 * a), cy / (3.0 * a)
+
+
+def _spread(lo, hi, count, margin_pct, inset=0.0):
     # A hair inside even at 0 %: a line exactly on the outline crosses nothing
-    m = (hi - lo) * max(margin_pct / 100.0, 1e-6)
+    m = max((hi - lo) * max(margin_pct / 100.0, 1e-6), inset)
     lo, hi = lo + m, hi - m
+    if lo > hi:
+        return []
     if count == 1:
         return [(lo + hi) * 0.5]
     return [lo + (hi - lo) * i / (count - 1) for i in range(count)]
 
 
-def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15.0):
+def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15.0, inset=0.0):
     """Connector positions (u, v) inside a seam outline.
 
     ``loops``: closed 2D loops of the seam section (outer loops and holes,
@@ -82,7 +119,9 @@ def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15
     outline, each centered in the widest material interval across the line
     (so hollow walls get their pin in the wall). GRID lays ``count`` x ``rows``
     points over the bounds and keeps those inside the material. ``margin_pct``
-    is kept free at both ends, as percent of the extent.
+    is kept free at both ends, as percent of the extent. ``inset`` is the
+    smallest allowed distance from a seam edge (connector radius + clearance +
+    wall); points closer to an edge are dropped.
     """
     loops = [loop for loop in loops if len(loop) >= 3]
     if not loops or count < 1:
@@ -90,9 +129,9 @@ def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15
     u0, u1, v0, v1 = _bounds(loops)
     if distribution == 'GRID':
         points = []
-        for v in _spread(v0, v1, max(1, rows), margin_pct):
-            for u in _spread(u0, u1, count, margin_pct):
-                if meshlib.point_in_polys_2d((u, v), loops):
+        for v in _spread(v0, v1, max(1, rows), margin_pct, inset):
+            for u in _spread(u0, u1, count, margin_pct, inset):
+                if fits_2d((u, v), loops, inset):
                     points.append((u, v))
         return points
 
@@ -100,8 +139,8 @@ def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15
     lo, hi = (u0, u1) if axis == 0 else (v0, v1)
     mid = (v0 + v1) * 0.5 if axis == 0 else (u0 + u1) * 0.5
     points = []
-    for s in _spread(lo, hi, count, margin_pct):
-        intervals = line_intervals(loops, axis, s)
+    for s in _spread(lo, hi, count, margin_pct, inset):
+        intervals = [(b + inset, e - inset) for b, e in line_intervals(loops, axis, s) if e - b > 2 * inset]
         if not intervals:
             continue
         widest = max(e - b for b, e in intervals)
@@ -109,5 +148,7 @@ def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15
         b, e = min((iv for iv in intervals if iv[1] - iv[0] >= 0.9 * widest),
                    key=lambda iv: abs((iv[0] + iv[1]) * 0.5 - mid))
         c = (b + e) * 0.5
-        points.append((s, c) if axis == 0 else (c, s))
+        point = (s, c) if axis == 0 else (c, s)
+        if fits_2d(point, loops, inset):
+            points.append(point)
     return points

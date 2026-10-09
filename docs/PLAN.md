@@ -104,7 +104,7 @@ splitforge/                   # (Phase 0까지 snapsplit/)
   blender_manifest.toml
   core/
     compat.py                 # bpy.app.version 가드, 재질/모디파이어 API 차이 흡수
-    units.py                  # mm↔scene 정확 변환(scale_length·length_unit 전부 반영)
+    units.py                  # mm↔scene 정확 변환: Blender 표시와 같은 1 BU = scale_length m (2026-10-09 결정)
     log.py                    # logging 기반, DEBUG는 프리퍼런스 토글
     validate.py               # manifold/loose/transform/unit 검사 → ValidationReport
     boolean.py                # 불리언 파이프라인(4.4절)
@@ -266,7 +266,7 @@ run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
 | 업스트림 freehand 브랜치 리베이스/변경 | 머지 충돌 | 새 모듈 격리(strangler), 동기화 주기 짧게 |
 | 커넥터별 불리언이 O(N)으로 느림(51만 면·핀 3개 12.8s) | 대형 메시 UX | 핀/소켓을 한 컷당 1회 UNION/DIFFERENCE로 묶기(커터 join), 진행률 표시 |
 | 모달 클릭 배치의 undo 불명확 | 사용자 혼란 | 클릭마다 `undo_push`, 테스트로 undo 횟수 검증(GUI 수동) |
-| 단위: cm/imperial/scale_length≠1 씬에서 치수 오류 | 출력물 치수 불량 | `core/units.py` + 검증 패널에서 mm 권장 및 자동 전환 |
+| 단위: cm/imperial/scale_length≠1 씬에서 치수 오류 | 출력물 치수 불량 | `core/units.py`(Blender 표시 규약 1 BU = scale_length m) + 검증 패널에 "1 unit = … mm" 표시, STL/OBJ는 항상 mm로 출력 |
 | 한 번에 레거시를 대체하려다 회귀 | 기능 손실 | 레거시 패널 유지, 동등성 테스트 통과 후 삭제 |
 
 ## 7. 사용자 결정 필요 사항

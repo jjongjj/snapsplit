@@ -2,46 +2,28 @@
 # This file is part of SplitForge (fork of SnapSplit by Christoph Medicus).
 
 # core/units.py
-"""Exact millimeter <-> scene unit conversion.
+"""Exact millimeter <-> scene unit conversion, following Blender's own display.
 
-Convention (3D printing): one Blender unit (BU) stands for one ``length_unit``
-multiplied by ``scale_length``. A "millimeter scene" (Metric, Millimeters,
-Unit Scale 1.0) therefore has 1 BU == 1 mm, which is also what STL slicers
-assume; Metric/Meters with Unit Scale 0.001 is a millimeter scene as well.
+Blender shows a length of ``x`` Blender units (BU) as ``x * scale_length``
+meters, whatever ``length_unit`` is used for display. The add-on uses the same
+rule, so a millimeter value in the add-on always equals what Blender shows in
+millimeters:
+
+- Millimeters + Unit Scale 0.001 (the usual 3D-print setup): 1 BU = 1 mm.
+- Meters + Unit Scale 1.0: 1 BU = 1000 mm.
+- Millimeters + Unit Scale 1.0: also 1 BU = 1000 mm (Blender shows a 40 BU
+  cube as 40000 mm).
 
 All functions accept a Scene, its UnitSettings or ``None`` (active scene).
 """
 
 import bpy
 
-# Size of one length unit in millimeters
-LENGTH_UNIT_MM = {
-    'KILOMETERS': 1_000_000.0,
-    'METERS': 1000.0,
-    'CENTIMETERS': 10.0,
-    'MILLIMETERS': 1.0,
-    'MICROMETERS': 0.001,
-    'MILES': 1_609_344.0,
-    'FEET': 304.8,
-    'INCHES': 25.4,
-    'THOU': 0.0254,
-}
-
-# Unit used for 'ADAPTIVE' (and system 'NONE'): the base unit of the system
-_BASE_UNIT = {'METRIC': 'METERS', 'IMPERIAL': 'FEET', 'NONE': 'METERS'}
-
 
 def _unit_settings(scene_or_units=None):
     if scene_or_units is None:
         scene_or_units = bpy.context.scene
     return getattr(scene_or_units, "unit_settings", scene_or_units)
-
-
-def length_unit_mm(system, length_unit):
-    """Millimeters per ``length_unit`` (pure function, no bpy access)."""
-    if system == 'NONE' or length_unit not in LENGTH_UNIT_MM:
-        length_unit = _BASE_UNIT.get(system, 'METERS')
-    return LENGTH_UNIT_MM[length_unit]
 
 
 def exact_scale(scale_length):
@@ -54,9 +36,8 @@ def exact_scale(scale_length):
 
 
 def bu_to_mm_factor(scene_or_units=None):
-    """Millimeters represented by one Blender unit in the given scene."""
-    us = _unit_settings(scene_or_units)
-    return length_unit_mm(us.system, us.length_unit) * exact_scale(us.scale_length)
+    """Millimeters represented by one Blender unit (1000 x Unit Scale)."""
+    return 1000.0 * exact_scale(_unit_settings(scene_or_units).scale_length)
 
 
 def mm_to_scene(mm, scene_or_units=None):
@@ -70,5 +51,5 @@ def scene_to_mm(value, scene_or_units=None):
 
 
 def is_mm_scene(scene_or_units=None, tol=1e-9):
-    """True when one BU is exactly one millimeter."""
+    """True when one BU is exactly one millimeter (Unit Scale 0.001)."""
     return abs(bu_to_mm_factor(scene_or_units) - 1.0) <= tol
