@@ -10,14 +10,15 @@ side (point-in-mesh probes, so any number of earlier/later cuts works). A
 double-sided dowel has a socket in both parts and becomes a separate dowel
 part. The solids of one part (connectors/shapes.py) are joined into a single
 operand, so every part gets at most one UNION and one DIFFERENCE, however many
-connectors it carries. Solids that overlap inside one operand (snap bumps on
-their pin, custom meshes, connectors placed into each other) mark the part, so
-its booleans use self-intersection handling.
+connectors it carries. A connector whose own solids overlap (snap bumps on their
+pin, a custom mesh) is first united into one clean solid; connectors placed into
+each other mark the part, so its booleans use self-intersection handling.
 """
 
 from dataclasses import dataclass, field
 
 import bmesh
+import bpy
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
@@ -149,17 +150,44 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
             if any(_capsules_touch(capsule, other) for other in capsules.get(piece, ())):
                 out.overlapping.add(piece)
             capsules.setdefault(piece, []).append(capsule)
-        if len(solids.pin) > 1 or len(solids.socket) > 1 or spec.kind == 'CUSTOM':
-            # Snap bumps overlap their pin (dimples their socket); an offset custom mesh may fold
-            out.overlapping.update((pin_piece, socket_piece))
         for table, piece, group in ((out.pins, pin_piece, solids.pin),
                                     (out.sockets, pin_piece, solids.pin_socket),
                                     (out.sockets, socket_piece, solids.socket)):
-            for solid in group:
-                solid.add_to(table.setdefault(piece, bmesh.new()))
+            if not group:
+                continue
+            target = table.setdefault(piece, bmesh.new())
+            if len(group) == 1 and spec.kind != 'CUSTOM':
+                group[0].add_to(target)
+                continue
+            # Snap bumps overlap their pin (dimples their socket), an offset custom mesh may fold:
+            # unite them into one clean solid first (small), so the part's boolean needs no
+            # self-intersection handling (slow on large parts); if that fails, the part gets it.
+            joined = bmesh.new()
+            try:
+                for solid in group:
+                    solid.add_to(joined)
+                united, _why = boolean.unite_bm(joined)
+                if united is None:
+                    out.overlapping.add(piece)
+                    _append(target, joined)
+                else:
+                    _append(target, united)
+                    united.free()
+            finally:
+                joined.free()
         if solids.dowel is not None:
             out.dowels.append(DowelSpec(spec.label, *solids.dowel))
     return out
+
+
+def _append(dst, src):
+    """Add the geometry of bmesh ``src`` to bmesh ``dst`` (through a temporary mesh)."""
+    mesh = bpy.data.meshes.new("_SplitForge_Append")
+    try:
+        src.to_mesh(mesh)
+        dst.from_mesh(mesh)
+    finally:
+        bpy.data.meshes.remove(mesh)
 
 
 @dataclass
