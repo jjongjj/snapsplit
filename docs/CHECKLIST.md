@@ -203,6 +203,7 @@
 결과(2026-10-09): 헤드리스 38/38 PASS ×2(4.5.5/5.2.2), `--gui` 12개 시나리오 ×2 PASS, `--slow test_perf_large`(5.2, 514 560면) PASS:
 평면 Build Auto 13.81 s / **Accurate 38.16 s**(이전 60.45 s; 셸 합침 1회 후 커넥터 EXACT 4회, 폴백 0), S자 Build Auto 8.88 s(MANIFOLD) /
 **Accurate 38.81 s**(이전 86.71 s; 합침 ~30 s + EXACT 1.7/1.7/1.0/0.9 s).
+- 독립 검증(2026-10-09, verifier, develop 3d90da6, D13–D15): 헤드리스 38/38 ×2 PASS, `--gui` 12시나리오 ×2 PASS, `--slow`(5.2) PASS: 평면 Auto 14.75 s / Accurate 46.49 s(4x EXACT), S자 Auto 9.49 s / Accurate 41.89 s(4x EXACT; 구현자 38.2/38.8 s보다 ~20 % 김). 뮤테이션 5/5 검출(합치기 끔·면 내부 판정 항상 참·삼각분할 끔·합친 부피 재검사 끔·캐시 갱신 안 함). 적대: 손실 주입 36건 모두 거부(D13 해결), 원시 140° 지그재그 쪽 판정 불일치 0(D15 해결), 공동+겹친 셸 Accurate에서 공동 유지. 라이브 5.2: Accurate 6x EXACT·폴백 0(D14 해결). 새 결함 D16(셸 합치기 결과에 부피 하한 없음 — 3 % 축소 주입 통과, 중간~낮음). MANUAL_QA "D13–D15 수정 라이브 검증".
 
 ## Phase 3 — 커넥터 고도화 + 레거시 제거
 

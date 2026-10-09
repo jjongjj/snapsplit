@@ -350,10 +350,38 @@ headless(검증자 스크래치, 커밋 안 함):
 
 ---
 
+## D13–D15 수정 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop 3d90da6)
+
+독립 검증자, 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa9/`, 같은 안전 규칙. Millimeters + Unit Scale 0.001. 재로드 43개 purge 후 enable.
+
+1. 구멍 메운 Suzanne(눈 포함, Subsurf 2 모디파이어, `QA9_Monkey`) + Z 평면 컷(−8, gap 0.3, Distribute 1) + 눈을 지나는 S자(gap 0.5, Distribute 3)(`qa9/scenario.py`):
+   - Fast 0.32 s: "Intersecting shells stay overlapping in the parts (Booleans: Fast); slicers unite them, Accurate unites them here", "Booleans (Fast): 6x MANIFOLD", 3파트 매니폴드.
+   - Accurate 1.06 s: "Intersecting shells were united into one solid (Booleans: Accurate)", "Booleans (Accurate): **6x EXACT**", **폴백 0**, 3파트 매니폴드, 파트 관입 0.
+   - 원본 해시 불변, 임시 오브젝트·고아 메쉬 0, `view_layer.objects`에 None 0.
+   - Fast 파트에서 레이 홀짝 관입 프로브가 AB→AA 최대 2.0 mm를 표시했으나, AA는 겹친 셸을 가진 자기교차 메시(BVH 자기 겹침 750쌍)라
+     홀짝 판정이 불안정한 것(레이 3개 투표 1/0/0). 해당 정점은 정확한 2D 판정으로 모두 B 쪽, 리본에서 1.6–1.7 mm(> 반갭) — 실제 관입 아님.
+2. 스크린샷: Accurate 3파트 분해 표시, S 리본(커넥터 3) + Z 평면(커넥터 1) 오버레이, 패널 "Part of QA9_Monkey", "3 part(s)" [Accurate 파트](qa/p2g_live_52_accurate_parts.png).
+
+headless(검증자 스크래치, 커밋 안 함):
+- D13 재확인: 이전 적대 메시 9종(ico, UV 구, 머리만 Suzanne 0/1/2단계, 흔든 큐브 2/4, 비평면 64각형 뚜껑 원기둥 2/5)에 한쪽 0.5–3 % 손실 주입 → **36건 모두 거부·재시도**(이전에는 거친 메시 13건 통과).
+- D15 재확인: 원시 지그재그(꺾임 140°) 포함 스트로크 11종 × 2만 점 — 리본 쪽 판정과 정확한 2D 판정 불일치 **0**(이전 649).
+- 내부 공동 + 겹친 셸(벽 3 mm 중공 상자 + 윗벽에 박힌 원기둥): Accurate는 합친 뒤 공동을 유지(공동 셸 −39135 = 34³ − 원기둥이 공동으로 들어간 부피),
+  컷이 공동을 지나면 공동이 열린 U자 파트, Fast는 원기둥이 겹친 별도 셸로 남고 정보 줄로 알림. 모두 매니폴드.
+- 셸 합치기 결과 검증: EXACT_SELF 합집합 결과를 3 % 줄이도록 주입하면 **그대로 받아들여짐**(부피 16839.8 vs 정상 17360.6, 경고 없음) — 아래 D16.
+
+열린 항목:
+- [중간~낮음] D16: `boolean.unite_bm`이 결과 부피의 상한(≤ 원래 부피)만 검사하고 하한이 없어, 부피를 잃은 합집합(셸 하나 빠짐·축소)을 받아들인다.
+  이후 모든 불리언 검사가 이 잘못된 기준으로 진행된다. 제안: 하한(≥ 가장 큰 셸 부피, ≥ 원래 부피 − 작은 셸들 부피 합) 또는 MANIFOLD 합집합과 비교.
+- [낮음] 곡선 컷 조각은 전체를 삼각분할하므로 곡선 컷이 지나간 파트는 사각형 토폴로지를 잃는다(프린트에는 무관).
+- [낮음] 51만 면 Accurate 시간이 구현자 수치보다 ~20 % 김(평면 46.5 s vs 38.2, S자 41.9 s vs 38.8; 상한 120 s 안).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| D13–D15 수정 라이브(MCP) | — | PASS (새 결함 D16) | 2026-10-09 verifier, develop 3d90da6: 눈 있는 Suzanne 평면+S자+커넥터 — Accurate "6x EXACT" 폴백 0·셸 합침 정보, Fast "6x MANIFOLD"·겹침 정보. `--gui` 12×2·헤드리스 38/38 ×2·`--slow` PASS. 위 "D13–D15 수정 라이브 검증" 절 |
 | P2 후속 수정 라이브(MCP) | — | PASS (결함 D13–D15) | 2026-10-09 verifier, develop 398154a: 품질 Accurate/Fast/Auto 비교(눈 있는 Suzanne S자), 정보 줄 솔버·폴백, 갭 문제 패널 표시·해제. `--gui` 12×2·헤드리스 37/37 ×2·`--slow` PASS. 위 "P2 후속 수정 라이브 검증" 절 |
 | P2 곡선 컷 라이브(MCP) | — | PASS (결함 D9–D11) | 2026-10-09 verifier, develop 29cd845: 큐브·Suzanne(눈) S자 gap 0.5, 곡면 시임 커넥터, Build 매니폴드·관입 0·원본 불변·눈 정보 메시지. `--gui` 12시나리오 ×2·헤드리스 34/34 ×2·`--slow` PASS. 열린 항목 — 위 "P2 곡선 컷 라이브 검증" 절 |
 | QA-7 곡선(스트로크) 컷 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p2-curved: `--gui` p2_stroke — 실제 LMB 드래그·Enter·Ctrl+Z/Ctrl+Shift+Z·모달 Build(눈 셸 정보)·Esc/RMB·Shift 스냅·Redraw·파일 로드. 사람 확인 남음: 리본 프리뷰 가독성, 원근 뷰에서 그린 감각(압출은 뷰 방향 하나, 원근 광선이 아님) [4.5](qa/p2_stroke_4.5.png) [5.2](qa/p2_stroke_5.2.png) |
