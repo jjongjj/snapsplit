@@ -942,6 +942,20 @@ def _point_in_poly_2d(pt, poly):
     return inside
 
 
+def _loop_inside_loop_2d(inner, outer):
+    """Return True if every point of 'inner' lies inside the 2D polygon 'outer'.
+
+    Testing all points (not just the first) makes the result independent of
+    the loop's start vertex, which comes from set iteration order and varies
+    between runs. Partially overlapping loops (e.g. intersecting shells such
+    as Suzanne's eyes poking out of the head) are therefore never holes.
+    """
+    ox = [p[0] for p in outer]; oy = [p[1] for p in outer]
+    if any(not (min(ox) <= x <= max(ox) and min(oy) <= y <= max(oy)) for x, y in inner):
+        return False
+    return all(_point_in_poly_2d(p, outer) for p in inner)
+
+
 def _group_loops_by_nesting(loops, ax):
     """Group closed loops of ONE cut plane into 'outer loop + its direct holes'.
 
@@ -965,7 +979,7 @@ def _group_loops_by_nesting(loops, ax):
         containers = [i for i in range(n)
                       if i != j
                       and infos[i]['area'] > infos[j]['area']
-                      and _point_in_poly_2d(infos[j]['pts'][0], infos[i]['pts'])]
+                      and _loop_inside_loop_2d(infos[j]['pts'], infos[i]['pts'])]
         infos[j]['depth'] = len(containers)
         # Direct parent = smallest loop that still contains this one
         infos[j]['parent'] = min(containers, key=lambda i: infos[i]['area']) if containers else None

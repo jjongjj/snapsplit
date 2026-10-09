@@ -40,6 +40,20 @@ def make_monkey_manifold(size_mm=40.0):
     return obj
 
 
+def make_hollow_box(size_mm=40.0, wall_mm=2.0):
+    """Closed box with an inner cavity: outer cube plus inward-facing inner cube, one mesh."""
+    outer = make_cube(size_mm)
+    inner = make_cube(size_mm - 2.0 * wall_mm)
+    bm = bmesh.new()
+    bm.from_mesh(inner.data)
+    bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    bm.to_mesh(inner.data)
+    bm.free()
+    select_only([outer, inner], active=outer)
+    bpy.ops.object.join()
+    return outer
+
+
 def is_manifold(obj):
     """True if every edge is manifold and there are no wire/loose vertices."""
     bm = bmesh.new()
@@ -52,12 +66,12 @@ def is_manifold(obj):
         bm.free()
 
 
-def volume(obj):
-    """Volume of a closed mesh in object space (unsigned)."""
+def volume(obj, signed=False):
+    """Volume of a closed mesh in object space (unsigned unless signed=True)."""
     bm = bmesh.new()
     try:
         bm.from_mesh(obj.data)
-        return bm.calc_volume(signed=False)
+        return bm.calc_volume(signed=signed)
     finally:
         bm.free()
 
