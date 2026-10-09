@@ -455,6 +455,46 @@ headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p3f/`, 커밋 안 �
 
 ---
 
+## Phase 4 라이브 검증 — 릴리스 zip (Blender 5.2.2, 공식 MCP, 2026-10-10, develop bdd59e3)
+
+독립 검증자, 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa12/`, 같은 안전 규칙(MCP로 undo 없음, 저장된 참조·타이머 없음, 환경설정 리셋 없음, MCP 애드온 손대지 않음).
+develop에서 다시 빌드한 `splitforge-0.4.0.zip`(44파일, p4 워크트리 zip과 파일 내용 동일, git HEAD 파일과 바이트 동일)을 사용자처럼 설치:
+개발 저장소 애드온 `bl_ext.splitforge_dev.splitforge` 비활성 + 모듈 37개 purge → `extensions.package_install_files(repo="user_default",
+enable_on_install=True)` → `bl_ext.user_default.splitforge` 활성, 연산자 7종 등록, 설치된 manifest `version 0.4.0`·`blender_version_min 5.2.0`.
+새 씬 `QA12V`(미터)에서:
+
+1. 일부러 망가뜨린 메시(40 큐브, 면 하나 삭제, 면 2개 뒤집음, 떨어진 정점, 모서리 분리로 중복 정점 2개, 스케일 1.5·회전 20°): Check Mesh가 6가지 모두 보고
+   (열린 모서리 8, 떨어진 정점 1, 법선 불일치 4, 중복 2, 변환, 1 unit = 1000 mm). Fix 순서대로: Merge(2개 병합) → Fill Holes(면 1개, 정점 1개 삭제;
+   이때 법선 재계산도 같이 되어 법선 행도 해결) → Recalculate Normals(할 일 없음 CANCELLED) → Apply Rotation & Scale → Units(Keep Units) → 모든 행 통과,
+   부피 216000 = 60³. 두 번째 실행은 다섯 Fix 모두 CANCELLED + "already" 정보.
+2. 폴리라인 컷(정면, 점 4개, 갭 0.2) + 폴리곤 도려내기(위, 28×28, 깊이 12, 갭 0.2), 각각 Distribute 2개 → Build 0.18 s, "8x EXACT", 경고 0, 파트 3개 매니폴드
+   (플러그 9465.3 / 포켓 몸체 121635.4 / 아래 83780.3). Export STL 3파일: 각 파일 삼각형 280/564/284, 부피가 파트와 같음.
+   [빌드·패널](qa/p4v_live_52_release_built.png): 플러그 들어 올림, 포켓 바닥의 핀 2개, 폴리라인 시임, 검사 행 모두 체크.
+3. 한국어(인터페이스 번역 잠시 켬 → ko_KR·번역 끔·툴팁/보고 켬으로 정확히 복원) [한국어](qa/p4v_live_52_ko_panel.png): "출력 검사", "메시 검사", "회전·스케일 적용됨",
+   "닫힘(구멍 없음)", "법선이 바깥을 향함", "중복 정점 없음", "깊이 (mm)", "폴리곤: 꼭짓점 4개", "뷰포트에서 다시 그리기". 오류·정보 메시지는 영어(알려진 범위).
+4. 개발 애드온으로 돌아가기: 환경설정 > 추가 기능에서 SplitForge(User Default) 끄기 또는 제거 → "SplitForge dev (develop)" 저장소의 SplitForge 켜기
+   (같은 세션이면 먼저 끈 쪽 모듈이 남지 않도록 Blender 재시작 권장).
+
+headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p4v/`, 커밋 안 함):
+- D19 볼록 소켓 수치 검사(면 300점/삼각형, 모서리 40점, 정점): 원뿔·뒤집은 원뿔·상자·사면체·얇은 판·바늘 최소 여유 0.2500, UV 구 0.2496(0.998c), 최대 0.2545(+1.8 %),
+  매니폴드, 면적 0 삼각형 0, 원뿔 0.006 s; 별(오목) 2.0 s·0.2500.
+- 적대 폴리곤/폴리라인 26건: 나비넥타이·되접힘 거부, 오목 별(시계/반시계) 깊이 10 = 2645, 물체 일부 밖 = 2000/62000(커넥터 겹친 영역 안), 옆에서(깊이 8) 3200,
+  깊이 100/40 → 관통·Distribute "set a Depth", 깊이 0.05 → 20, 일직선+중복점 폴리라인 = 평면 컷, 같은 점 2개/3개·되돌아감 거부. 좁은 폴리곤(6 mm)에 5/9 mm
+  커넥터 → 배치 0(CANCELLED), 벽에 억지로 둔 커넥터는 Build가 건너뜀.
+- Fix 적대: 3면 모서리 메시(남김·보고), 열린 평면(채울 수 없음 보고), 빈 메시(모두 CANCELLED), 음수 스케일 + 자식·손자(월드 차이 1.9e-6, 부피 양수, Build 부피 동일),
+  공유 메시 4종 거부, delta 스케일(월드 유지, 스케일 0.5·delta 2로 남음), Keep Size 63개 오브젝트(계층·카메라·조명·엠프티) 물리 크기 모두 유지.
+- Phase 3(5054c05) 코드로 저장한 .blend(평면 + 스트로크 + 도브테일) → develop에서 열기·Build 매니폴드·폴리곤 추가·저장·다시 열기 정상.
+
+열린 항목:
+- [중간~낮음] D20: 꼭짓점이 ~20° 이하로 뾰족한 폴리라인 + 갭 > 0 → 추가·패널 검사는 통과하지만 Build가 "parts A + B = … with VOXEL, VOXEL; no solver left"로 실패
+  (아무것도 바뀌지 않음; 25° 이상은 정상, 폴리곤은 15°도 정상). 마이터 제한(cos ≥ 0.25) 때문에 쌍 부피 검사가 맞지 않음. 제안: 그런 꼭짓점을 추가 시점에 거부하거나 갭 부피 계산을 실제 리본으로.
+- [낮음] D21: 0.01 mm 폴리곤이 추가되고 Build에서 "failed with every boolean solver"(변경 없음) — 추가 시점 최소 크기 검사 없음.
+- [낮음] 폴리곤 바닥 커넥터가 벽에 걸리면 경고 문구가 "the curved seam bends into …"(곡선 시임 문구 재사용).
+- [낮음, 코드 리뷰] 점 찍는 중 뷰를 돌리면 첫 점 닫기(12 px)와 Ctrl 15° 스냅이 클릭 당시의 화면 좌표를 기준으로 함.
+- [정보] Fill Holes가 법선도 재계산하지만 보고에 뒤집은 면 수가 없음; `schema_version`은 파일에 쓰이지 않음(기본값만 읽힘 — 추가형 변경이라 문제 없음).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
