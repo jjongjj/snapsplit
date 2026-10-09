@@ -55,6 +55,11 @@ LARGE_FACES = 200_000
 # Relative volume tolerance of the checks (float noise of the solvers)
 VOLUME_TOLERANCE = 1e-6
 
+# unite_bm: the united shells and the input must enclose the same volume within this fraction
+# (winding-number ray integral on the same rays over the same triangles: input and result differ by
+# < 0.01 % on Suzanne; a 1 % loss is rejected)
+UNION_TOLERANCE = 0.002
+
 
 @dataclass
 class BooleanResult:
@@ -213,7 +218,15 @@ def united_volume(target):
 
 
 def unite_bm(bm, name=TARGET_NAME):
-    """Copy of ``bm`` with intersecting shells united: (bmesh, "") or (None, reason). Caller frees."""
+    """Copy of ``bm`` with intersecting shells united: (bmesh, "") or (None, reason). Caller frees.
+
+    The input is triangulated first: a non-planar n-gon has no well-defined volume (each
+    triangulation encloses a different one), so the solver and the volume checks must see the
+    same triangles. The result must be manifold, not larger than the input and enclose the same
+    volume as the input's shells together (winding-number ray integral, defect D16).
+    """
+    bm = bm.copy()
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
     mesh = bpy.data.meshes.new(name)
     bm.to_mesh(mesh)
     obj = bpy.data.objects.new(name, mesh)
@@ -221,18 +234,30 @@ def unite_bm(bm, name=TARGET_NAME):
     try:
         before = meshlib.bm_volume(bm)
         united = _united(obj)
+        out = bmesh.new()
         try:
             after, manifold, faces = mesh_volume_manifold(united)
             if not faces or not manifold or after > before * (1.0 + VOLUME_TOLERANCE) + 1e-9:
+                out.free()
                 return None, f"uniting the shells failed (manifold={manifold}, volume {before:.6g} -> {after:.6g})"
-            out = bmesh.new()
             out.from_mesh(united)
+            # Lower bound (defect D16): the result must enclose what the shells enclose together. The
+            # winding-number ray integral of the input counts each overlap once, independent of the solver;
+            # both are sampled on the same rays, so a lost shell or a shrunk result shows up.
+            bounds = meshlib.bm_bounds(bm)
+            expected = meshlib.winding_volume(bm, bounds=bounds)
+            got = meshlib.winding_volume(out, bounds=bounds)
+            if abs(got - expected) > UNION_TOLERANCE * expected:
+                out.free()
+                return None, (f"uniting the shells changed the enclosed volume ({expected:.6g} -> {got:.6g}, "
+                              f"exact {before:.6g} -> {after:.6g})")
             return out, ""
         finally:
             bpy.data.meshes.remove(united)
     finally:
         _drop(obj)
         bpy.data.meshes.remove(mesh)
+        bm.free()
 
 
 def _drop(obj):
