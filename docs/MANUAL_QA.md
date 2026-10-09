@@ -28,14 +28,13 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 - **Material Preview/Rendered 셰이딩**: 이 모드에서는 X-Ray가 없어 큐브 안 평면이 가려진다(현행 동작). 자동 검사는 Solid만 한다.
 
 공통 준비
-- 애드온 설치/활성화 후 새 파일(General). Scene Properties > Units: Metric, Length = Millimeters, Unit Scale = 1.0
-  (headless/GUI 테스트 하니스와 같은 설정).
-- 기본 큐브를 지우고 `Add > Mesh > Cube`를 **Size 40 BU**(이 설정에서 UI에는 "40 m"로 표시됨) 또는 Suzanne(Size 40 BU,
+- 애드온 설치/활성화 후 새 파일(General). Scene Properties > Units: Metric, Length = Millimeters, **Unit Scale = 0.001**
+  (표준 3D 프린트 설정, headless/GUI 테스트 하니스와 같은 설정: 1 BU = 1 mm).
+- 기본 큐브를 지우고 `Add > Mesh > Cube`를 **Size 40 mm**(= 40 BU, UI에 "40 mm"로 표시) 또는 Suzanne(Size 40 mm,
   Edit Mode에서 `Mesh > Clean Up > Fill Holes`)로 추가해 선택한다.
-- 단위 규약(P1-1 `core/units.py`, 레거시 `utils.unit_mm()`도 이것을 쓴다): **1 BU = 1 `length_unit` × `scale_length`**.
-  Millimeters + Unit Scale 1.0 → 1 BU = 1 mm, Meters + 0.001 → 1 mm, Centimeters + 1.0 → 10 mm, Inches → 25.4 mm.
-  주의: Blender 자신의 길이 표시는 1 BU = `scale_length` m로 계산하므로 위 준비(Millimeters, 1.0)에서 40 BU 큐브는
-  N 패널에 "40000 mm"로 표시된다(애드온·STL 기준으로는 40 mm). 이 차이는 사용자 결정 대상이다(체크리스트 P1-1 메모).
+- 단위 규약(P1-1 `core/units.py`, 레거시 `utils.unit_mm()`도 이것을 쓴다): Blender 표시와 같다 — **1 BU = Unit Scale m**.
+  애드온의 mm 값은 언제나 Blender가 mm로 보여 주는 값과 같다. Millimeters + 0.001 → 1 BU = 1 mm, Meters + 1.0 → 1000 mm,
+  Millimeters + 1.0 → 1000 mm(40 BU 큐브가 "40000 mm"). 패널 상단에 실제 "1 unit = … mm"가 보이며, Export STL/OBJ는 항상 mm로 쓴다.
 - 3D 뷰포트 N 패널 > **SplitForge** 탭을 연다(새 Draft/Easy 패널; 레거시 SnapSplit UI는 맨 아래 접힌 "Legacy" 서브패널).
   콘솔(Window > Toggle System Console)을 켜 두고 오류를 확인한다.
 
@@ -190,6 +189,14 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
   보지 않는다(P1-8 수용 기준 범위 밖). 축 정렬 컷(40 mm 큐브, 원기둥)에서는 발생하지 않음. 빌드 경고도 없음.
 - [낮음] 단위 표시 차이(P1-1 사용자 결정 대기): 패널 Origin X가 3 BU를 "3000 mm"로 표시.
 - [낮음] UI 목록이 좁은 사이드바에서 컷 이름이 잘림("C…", "gap …").
+
+후속 수정(fix/p1-followups, 2026-10-09):
+- 외곽 관통(D1) → Distribute가 시임 영역을 커넥터 반경+클리어런스+벽 0.4 mm만큼 안쪽으로 줄이고, 핀·소켓(양쪽 핀 방향 모두)을
+  3D로 원본 안에 있는지 검사해 안 맞으면 영역 중심 쪽으로 옮기거나(이미 놓인 커넥터와 겹치지 않게) 버리고 경고한다. Build는 원본
+  밖으로 나가는 커넥터(수동 배치 포함)를 경고와 함께 건너뛴다. 위 재현(Z −5 + 경사 컷)은 `tests/cases/test_connectors_fit.py`:
+  경사 컷 커넥터 4개 모두 안쪽으로 이동, 빌드 경고 0, 모든 파트 정점이 큐브(±20 mm) 안.
+- 단위 → 사용자 결정대로 Blender 표시 규약(1 BU = Unit Scale m). 표준 준비가 Millimeters + Unit Scale 0.001로 바뀌어 Origin도 mm로 표시.
+- 목록 잘림 → 컷 목록은 체크박스+이름만, 갭·커넥터 수는 아래 상자에 표시. 커넥터 목록은 "1 Pin  pin A".
 
 ---
 
