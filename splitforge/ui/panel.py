@@ -33,6 +33,8 @@ class SPLITFORGE_UL_cuts(UIList):
         row = layout.row(align=True)
         row.prop(item, "enabled", text="")
         row.prop(item, "name", text="", emboss=False)
+        if item.kind == 'STROKE' and item.problem:
+            row.label(text="", icon='ERROR')
 
 
 class SPLITFORGE_UL_connectors(UIList):
@@ -107,6 +109,12 @@ def draw_draft(context, layout, stack):
     row.prop(cut, "enabled")
     if cut.kind == 'STROKE':
         box.prop(cut, "gap_mm")
+        if cut.problem:
+            col = box.column(align=True)
+            col.alert = True
+            col.label(text="Cannot build this cut:", icon='ERROR')
+            for line in _wrap(cut.problem, 34):
+                col.label(text=line)
         box.label(text=f"Stroke: {len(cut.points)} points", icon='CURVE_BEZCURVE')
         op_row = box.row()
         op_row.operator_context = 'INVOKE_REGION_WIN'
@@ -122,6 +130,18 @@ def draw_draft(context, layout, stack):
     op_row = box.row()
     op_row.operator_context = 'INVOKE_REGION_WIN'
     op_row.operator(OP("cut_adjust_plane"), text="Adjust in Viewport", icon='ORIENTATION_GLOBAL')
+
+
+def _wrap(text, width):
+    """Split a message into lines of about ``width`` characters (labels do not wrap)."""
+    lines, cur = [], ""
+    for word in text.split():
+        if cur and len(cur) + 1 + len(word) > width:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}".strip()
+    return lines + ([cur] if cur else [])
 
 
 class SPLITFORGE_PT_main(_Base, Panel):
@@ -249,9 +269,7 @@ class SPLITFORGE_PT_settings(_Base, Panel):
         row = layout.row(align=True)
         row.prop(s, "material", text="")
         row.prop(s, "clearance_mm")
-        _obj, stack = _owner_stack(context)
-        if stack is not None:
-            layout.prop(stack, "solver")
+        layout.prop(s, "boolean_quality")
 
 
 classes = (

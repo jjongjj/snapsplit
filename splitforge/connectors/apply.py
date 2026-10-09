@@ -152,7 +152,7 @@ def operations(pins, sockets):
     return out
 
 
-def apply_step(obj, operand, operation, preference='AUTO', self_intersect=False):
+def apply_step(obj, operand, operation, quality='AUTO', self_intersect=False):
     """One connector boolean on a part. Returns the BooleanResult.
 
     The part must have an identity transform (its mesh is in world space) and be
@@ -160,17 +160,17 @@ def apply_step(obj, operand, operation, preference='AUTO', self_intersect=False)
     ``self_intersect``: the operand has intersecting solids, or the part has
     intersecting shells (the exact solver then needs self-intersection handling).
     """
-    return boolean.apply(obj, operand, operation, preference, self_intersect=self_intersect)
+    return boolean.apply(obj, operand, operation, quality, self_intersect=self_intersect)
 
 
-def apply_to_parts(part_objects, pins, sockets, preference='AUTO', overlapping=()):
+def apply_to_parts(part_objects, pins, sockets, quality='AUTO', overlapping=()):
     """One UNION (pins) and one DIFFERENCE (sockets) per part. Returns warnings.
 
     ``overlapping``: piece indices whose boolean needs self-intersection handling.
     """
     warnings = []
     for index, operand, operation in operations(pins, sockets):
-        result = apply_step(part_objects[index], operand, operation, preference, index in overlapping)
+        result = apply_step(part_objects[index], operand, operation, quality, index in overlapping)
         if not result.ok:
             warnings.append(result.message)
     return warnings

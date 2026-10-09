@@ -40,11 +40,21 @@ from . import shapes
 MIN_RING = 24
 MIN_RINGS = 9
 # Curved seams: samples within half gap + max(wall, OWN_SKIP * length) of the seam straddle it by design
+# (own_margin gives them a fading bonus)
 OWN_SKIP = 0.05
 # Skewed directions for the parity test (never parallel to axis-aligned faces/edges)
 _RAY_DIRS = (Vector((0.5773, 0.5774, 0.5775)).normalized(),
              Vector((-0.7071, 0.1234, 0.6963)).normalized(),
              Vector((0.2311, -0.9123, 0.3379)).normalized())
+
+
+# Distribute (wall > 0) wants own-seam clearance >= OWN_SAFETY x wall; Build skips only below 0,
+# so a position Distribute accepts never trips Build (defect D11)
+OWN_SAFETY = 0.25
+
+
+def own_required(wall):
+    return OWN_SAFETY * wall if wall > 0.0 else 0.0
 
 
 @dataclass
@@ -55,14 +65,14 @@ class FitResult:
     own_margin: float = math.inf        # curved seam: clearance from its own ribbon (beyond half gap)
 
     def ok(self, wall):
-        return (self.plane_margin >= wall and self.own_margin >= 0.0 and self.surface_depth >= wall
-                and not self.pierced)
+        return (self.plane_margin >= wall and self.own_margin >= own_required(wall)
+                and self.surface_depth >= wall and not self.pierced)
 
     def reason(self, wall):
         """Short reason the connector does not fit ("" if it does)."""
         if self.plane_margin < wall:
             return "other cut"
-        if self.own_margin < 0.0:
+        if self.own_margin < own_required(wall):
             return "own seam"
         if self.surface_depth < wall or self.pierced:
             return "surface"
@@ -81,17 +91,25 @@ class PlaneBarrier:
 
 
 class RibbonBarrier:
-    """A stroke cut: BVHs of its closed positive-side solid and of its open ribbon.
+    """A stroke cut: its open ribbon (BVH, depth-sliced) and an exact side test.
 
-    The side of a point is "inside the positive-side solid"; its distance is the
-    distance to the ribbon (the solid's other faces lie outside the object).
+    The side of a point comes from the nearest ribbon face's normal (ribbon
+    normals point to the positive side) when that is unambiguous, otherwise
+    from ``side_fn`` (exact 2D point-in-polygon of the cutter's positive side).
+    A ray-parity test on the cutter prism misclassified points next to its
+    sliver faces (defect D11: Distribute and Build disagreed at one position).
     """
 
-    def __init__(self, side_bvh, ribbon_bvh, gap):
-        self.side_bvh, self.ribbon_bvh, self.gap = side_bvh, ribbon_bvh, gap
+    def __init__(self, ribbon_bvh, gap, side_fn):
+        self.ribbon_bvh, self.gap, self.side_fn = ribbon_bvh, gap, side_fn
 
     def positive(self, p):
-        return is_inside(self.side_bvh, p)
+        co, normal, _index, dist = self.ribbon_bvh.find_nearest(p)
+        if co is not None and dist > 0.0:
+            dot = (p - co).dot(normal)
+            if abs(dot) > 0.5 * dist:
+                return dot > 0.0
+        return self.side_fn(p)
 
     def distance(self, p):
         hit = self.ribbon_bvh.find_nearest(p)
@@ -244,10 +262,13 @@ def plane_margin(spec, planes, pin_positive=None, max_step=None):
 def own_margin(spec, own, pin_positive=None, max_step=None, skip=None):
     """Clearance of a connector on a curved seam from its own ribbon.
 
-    Samples with local |z| below half gap + ``skip`` (default OWN_SKIP x
-    length) straddle the seam by design and are ignored; every other sample
-    must lie on the side its local z points to (+z = positive side), beyond the
-    half gap. Negative: the ribbon bends into the pin or socket.
+    Every sample beyond the gap (local |z| >= half gap) must lie on the side its
+    local z points to (+z = positive side). Its clearance is its distance from
+    the ribbon minus the half gap; samples within ``skip`` of the gap (default
+    OWN_SKIP x length) straddle the seam by design and get a bonus that fades
+    from ``skip`` to 0 over that zone, so the measure is continuous (a hard
+    zone edge made a sample ring flip in or out with float rounding, defect
+    D11). Negative: the ribbon bends into the pin or socket.
     """
     if own is None:
         return math.inf
@@ -257,10 +278,11 @@ def own_margin(spec, own, pin_positive=None, max_step=None, skip=None):
     worst = math.inf
     for p in spec_samples(spec, pin_positive, max_step):
         z = (inv @ p).z
-        if abs(z) < half + skip:
+        if abs(z) < half:
             continue
         d = own.distance(p)
-        worst = min(worst, (d if own.positive(p) == (z > 0.0) else -d) - half)
+        signed = d if own.positive(p) == (z > 0.0) else -d
+        worst = min(worst, signed - half + max(0.0, half + skip - abs(z)))
     return worst
 
 
@@ -279,7 +301,7 @@ def check(spec, bvh, planes=(), wall=0.0, both_sides=False, max_step=None, own=N
             return res
         res.own_margin = min(res.own_margin, own_margin(spec, own, side, max_step,
                                                         max(wall, OWN_SKIP * spec.length)))
-        if res.own_margin < 0.0:
+        if res.own_margin < own_required(wall):
             return res
     for side in sides:
         grids = _grids(spec, side, max_step)

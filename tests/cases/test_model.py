@@ -29,7 +29,6 @@ def _fill(obj):
         stroke.points.add().co = (k * 3.0 - 6.0, 0.5 * k, -0.25 * k * k)
     stack.active_index = 1
     stack.mode = 'EASY'
-    stack.solver = 'FAST'
     for j in range(3):
         c = stack.cuts[j % 2].connectors.add()
         c.kind = 'RECT_TENON' if j == 1 else 'CYL_PIN'
@@ -51,7 +50,7 @@ def _snapshot(obj):
                      tuple(round(x, 5) for x in cut.normal), round(cut.gap_mm, 5), cut.cap,
                      cut.distribution, cut.connector_rows, conns, tuple(round(x, 5) for x in cut.direction),
                      [tuple(round(x, 5) for x in p.co) for p in cut.points]))
-    return (stack.active_index, stack.mode, stack.solver, stack.schema_version, cuts)
+    return (stack.active_index, stack.mode, stack.schema_version, cuts, bpy.context.scene.splitforge.boolean_quality)
 
 
 def run(ctx):
@@ -59,9 +58,10 @@ def run(ctx):
     cube = lib.make_cube(40.0)
     cube.name = "ModelCube"
     _fill(cube)
+    bpy.context.scene.splitforge.boolean_quality = 'FAST'
     before = _snapshot(cube)
-    assert len(before[4]) == 3 and sum(len(c[10]) for c in before[4]) == 3, before
-    assert before[4][2][3] == 'STROKE' and len(before[4][2][12]) == 5 and before[3] == 2, before
+    assert len(before[3]) == 3 and sum(len(c[10]) for c in before[3]) == 3, before
+    assert before[3][2][3] == 'STROKE' and len(before[3][2][12]) == 5 and before[2] == 2 and before[4] == 'FAST', before
 
     path = os.path.join(bpy.app.tempdir, "test_model.blend")
     bpy.ops.wm.save_as_mainfile(filepath=path, check_existing=False)

@@ -124,7 +124,7 @@ def run(ctx):
     lib.select_only([cube])
     cube.hide_set(False)
     lib.run_op(bpy.ops.splitforge.stack_add_stroke, direction=(0.0, 1.0, 0.0),
-               points=[{"name": "", "co": (-26.0 + 52.0 * i / 19, 0.0, 6.0 + 3.0 * math.sin(i / 3.0))}
+               points=[{"name": "", "co": (-26.0 + 52.0 * i / 19, 0.0, 6.0 + 1.5 * math.sin(i / 3.0))}
                        for i in range(20)])
     lib.run_op(bpy.ops.splitforge.connector_add_auto)
     log = _draw_all("stroke")

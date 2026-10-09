@@ -399,6 +399,7 @@ class StrokeCutter:
     extended: list       # curve extended to the box boundary
     plus: list           # extended curve offset by +gap/2 (= extended without gap)
     minus: list          # extended curve offset by -gap/2
+    _left: list = None   # cached positive-side polygon
 
     # --- solids ---------------------------------------------------------------
 
@@ -444,9 +445,15 @@ class StrokeCutter:
 
     # --- point queries --------------------------------------------------------
 
+    def is_positive(self, p):
+        """True if world point ``p`` is on the positive side of the ribbon (exact, 2D)."""
+        if self._left is None:
+            self._left = left_polygon(self.extended, self.box)
+        return point_in_polygon(self.frame.to2d(p), self._left)
+
     def side(self, p):
         """+1 if world point ``p`` is on the positive side of the ribbon, else -1."""
-        return 1 if point_in_polygon(self.frame.to2d(p), left_polygon(self.extended, self.box)) else -1
+        return 1 if self.is_positive(p) else -1
 
     def distance(self, p):
         """Distance of world point ``p`` from the ribbon (perpendicular to d)."""
