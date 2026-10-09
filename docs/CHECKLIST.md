@@ -156,6 +156,33 @@
   오프셋 교차 검사에 먼저 걸리는 중복 방어선(남겨 둠).
 - 독립 검증(2026-10-09, verifier, develop 29cd845): 헤드리스 34/34 ×2회 PASS(4.5.5/5.2.2), `--gui` 12시나리오 ×2버전 PASS(p2_stroke 43/48 s, p2_build_progress 56/55 s), `--slow test_perf_large`(5.2) PASS: 평면 Build 58.69 s, S자 Build 93.12 s(< 120 s; 구현자 85.35 s), 스트로크 추가 0.19 s, Distribute 0.82 s. 뮤테이션 8건 중 6건 검출(쌍 검사 끔·매니폴드 검사 끔·셸 교차 감지 끔·굽힘 검사 끔·자기 시임 검사 끔·리본 교차 판정 끔); 미검출 2건: Esc 시 `gen.close()` 제거(참조 해제로 CPython이 같은 정리를 함 — 등가 뮤턴트), 스트로크를 로컬 대신 월드로 저장(변환된 오브젝트 테스트 없음, 코드는 정확). 적대 스트로크(지그재그·헤어핀·짧음·부분·물체 밖·고리·나선·회전/스케일) 모두 올바르게 빌드 또는 이유와 함께 거부. Suzanne EXACT 빈 결과 원인 재현. 라이브 5.2 PASS(MANUAL_QA "P2 곡선 컷 라이브 검증"). 열린 결함: D9 쌍 검증 허용치 4 %가 셸 교차 없는 조각에도 적용(5 % 손실 통과, 중간~낮음), D10 곡선 컷 VOXEL 폴백 경고 누락(낮음~중간), D11 Distribute/Build 자기 시임 경계 불일치(낮음).
 
+### Phase 2 후속 (fix/p2-followups, 검증자 결함 D9–D11 + 사용자 결정 7)
+
+- [x] **P2F-1 불리언 품질 설정**: `Scene.splitforge.boolean_quality` Auto/Accurate/Fast(Settings 패널, 툴팁에 트레이드오프), 객체별 `solver` 속성 제거.
+  Build 정보 줄에 솔버·폴백. 검증: `test_boolean_quality.py`(Suzanne: Accurate는 곡선 컷 EXACT_SELF·눈 겹침 부피 합침, Fast는 MANIFOLD·겹침 유지,
+  Auto는 임계값 아래 Accurate·위 Fast, 정보 줄 "Booleans (…)"), `test_boolean.py`(품질별 순서). 성능은 아래.
+- [x] **P2F-2 D9 쌍 검사 엄격화**: 셸 교차가 없으면 허용 0.1 % + 1e-7×대각³ + 리본이 지나는 면의 삼각분할 여유(`meshlib.triangulation_slack`,
+  평면 면 0); 4 %는 셸 교차·voxel일 때만. 발견: 머리만 남긴 Suzanne도 비평면 사각형 때문에 모든 솔버가 0.12 % "잃음"(조각 부피는
+  사각형의 한 삼각분할 기준) — 여유 없이 0.1 %면 정상 컷이 거부됨. 검증: `test_stroke_checks.py`(한쪽 3 % 손실 주입 → 다음 솔버로 둘 다 재시도,
+  머리만 Suzanne S자(gap 0.4) 첫 시도 통과).
+- [x] **P2F-3 D10**: voxel 폴백으로만 성공한 곡선 컷은 Build 경고(+ 정보 줄 fallbacks). 검증: 같은 테스트(voxel 외 전부 실패 주입 → 경고 2건).
+- [x] **P2F-4 D11 Distribute/Build 불일치**: 원인 둘 — (1) 리본 쪽 판정이 커터 프리즘(가는 삼각형)의 광선 홀짝이라 샘플 하나를 반대쪽으로 판정 →
+  최근접 리본 면 법선(애매하면 정확한 2D 다각형 판정)으로 교체, (2) 자기 시임 검사의 "건너뛰는 구역" 경계에 샘플 링이 정확히 놓여(z = 0.75)
+  저장된 u의 float32 반올림으로 포함/제외가 바뀜 → 구역 안 샘플에 점점 줄어드는 보너스를 줘 연속 측도로. Distribute는 자기 시임 여유 0.1 mm
+  (= 0.25×벽, Build는 0) 요구. 검증: `test_stroke_checks.py`(진폭 14 S자 큐브, gap 0.5, 개수 2/3/4/6: Build "bends into" 0건, 모든 커넥터 양쪽
+  여유 ≥ 0.1 mm, 쪽 판정 13552 샘플 불일치 0, 규칙 단위 검사).
+- [x] **P2F-5 변환된 오브젝트**: `test_stroke_transform.py` — 이동·회전·비균일 스케일 오브젝트의 스트로크 = 변환 적용 사본의 같은 스트로크(부피 0.2 %,
+  커넥터 위치 0.05 mm), 이후 오브젝트를 옮기면 컷이 따라감. (월드 공간 저장 뮤턴트 검출)
+- [x] **P2F-6 갭 UX**: 스트로크 컷의 갭을 바꾸면 즉시 검사해 `cut.problem`에 이유 저장, 패널(컷 상자 경고 + 목록 아이콘)에 표시, 줄이면 사라짐.
+  검증: `test_stroke_checks.py`(gap 12 → "bends too sharply for its gap", 패널 라벨·목록 ERROR 아이콘, 0.5로 되돌리면 빈 문자열·Build 성공).
+- [x] **P2F-7 성능(5.2, 514 560면, `--slow`)**: 평면 Build Auto 14.43 s / Accurate 60.45 s, S자 Build Auto 6.24 s(MANIFOLD 4회) / Accurate 86.71 s
+  (EXACT_SELF 29.2/28.0/13.8/12.2 s). 상한 120 s 둘 다 통과. Accurate 평면 Build에서는 커넥터 불리언 3건이 EXACT_SELF 검증 실패 후 MANIFOLD로 폴백.
+- 뮤테이션(새 테스트) 11/11 검출: 월드 공간 저장, 변환 무시, D9 항상 느슨, 삼각분할 여유 제거, D10 경고 누락, D11 하드 경계 복원, Distribute 여유 제거,
+  Auto가 크기 무시, Build가 설정 무시, 솔버 요약 누락, 갭 재검사 누락.
+
+결과(2026-10-09, fix/p2-followups): 헤드리스 37/37 PASS ×2(4.5.5/5.2.2), `--gui` 12개 시나리오 ×2 PASS, `--slow test_perf_large`(5.2) PASS
+(위 P2F-7 수치).
+
 ## Phase 3 — 커넥터 고도화 + 레거시 제거
 
 - [ ] **P3-1 전 타입 지원**: DOVETAIL, SNAP_PIN, SNAP_TENON, SNAP_DOVETAIL, CUSTOM을 `connectors/shapes.py`로 이관, 새 apply 경로에서 생성.

@@ -74,6 +74,8 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 절차: Suzanne(Subdivision 4~5 적용) + 스트로크 컷 + 평면 컷 + Distribute, Build. 진행 중 Esc로 한 번 취소한 뒤 다시 Build.
 
 기대 결과: 진행 중 커서 진행률 숫자와 하단 상태바 "SplitForge Build: Stroke 1: side A (1/4)" 같은 텍스트가 갱신되고, UI가 단계 사이에 다시 그려진다.
+**알려진 제한**: 상태바 텍스트는 각 불리언 단계 *시작 전에* 갱신되지만, 한 단계(불리언 1회) 동안은 Blender가 응답하지 않는다(UI 정지, Esc도 그 단계가
+끝난 뒤 처리). Accurate 품질에서 51만 면 S자 컷은 단계 하나가 ~30 s; Auto/Fast(MANIFOLD)에서는 ~0.7 s. Settings > Booleans로 고른다.
 Esc는 진행 중인 불리언 단계가 끝난 뒤 멈추고 경고 "Build cancelled; the previous result is unchanged" — 이전 파트 그대로.
 
 ## QA-6 Draft 패널 → Build → Export (P1-12 GUI)
