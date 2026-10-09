@@ -101,6 +101,7 @@ def bm_volume(bm):
 # Grid of the ray integration in winding_volume (rays per bbox side); offsets avoid mesh-aligned rays
 WINDING_GRID = 96
 _WINDING_JITTER = (0.3819660, 0.6180340)
+_WINDING_SKEW = (7.31e-4, 5.27e-4)
 
 
 def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, bvh=None):
@@ -126,37 +127,50 @@ def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, bvh=None):
     if du <= 0.0 or dw <= 0.0:
         return 0.0
     bvh = bvh if bvh is not None else BVHTree.FromBMesh(bm)
+    bm.verts.index_update()
+    corners = [frozenset(v.index for v in f.verts) for f in bm.faces]
     scale = max(maxs[k] - mins[k] for k in range(3)) or 1e-9
     start = mins[axis] - 0.01 * scale
-    eps = 1e-7 * scale
+    # Step past a hit: well above float32 precision (the BVH stores float32 coordinates; a smaller step
+    # can hit the same triangle again)
+    eps = 2e-5 * scale
+    # Slightly skewed rays: never parallel to an axis-aligned face (a ray inside a face's plane would hit
+    # that face again and again); the skew changes the tube cross-section by < 1e-6
     direction = Vector((0.0, 0.0, 0.0))
     direction[axis] = 1.0
+    direction[u], direction[w] = _WINDING_SKEW
+    direction.normalize()
     total = 0.0
     for i in range(grid):
         cu = mins[u] + (i + _WINDING_JITTER[0]) * du
         for j in range(grid):
-            origin = Vector((0.0, 0.0, 0.0))
-            origin[u], origin[w], origin[axis] = cu, mins[w] + (j + _WINDING_JITTER[1]) * dw, start
+            base = Vector((0.0, 0.0, 0.0))
+            base[u], base[w], base[axis] = cu, mins[w] + (j + _WINDING_JITTER[1]) * dw, start
+            origin = base
             winding, inside_from, length = 0, None, 0.0
-            last_t, last_sign = None, 0
-            for _ in range(100000):
+            last_t, last_sign, last_index = None, 0, -1
+            for _ in range(10000):
                 hit, normal, _index, _dist = bvh.ray_cast(origin, direction)
                 if hit is None:
                     break
-                t = hit[axis]
-                sign = -1 if normal[axis] > 0.0 else 1      # entering a solid: normal against the ray
-                # The same crossing reported twice (ray through a shared edge or vertex)
-                if not (last_t is not None and sign == last_sign and t - last_t < 10.0 * eps):
-                    before = winding
-                    winding += sign
-                    if before <= 0 < winding:
-                        inside_from = t
-                    elif winding <= 0 < before and inside_from is not None:
-                        length += t - inside_from
-                        inside_from = None
-                    last_t, last_sign = t, sign
-                origin = origin.copy()
-                origin[axis] = t + eps
+                t = (hit - base).dot(direction)
+                facing = normal.dot(direction)
+                if abs(facing) > 1e-9:
+                    sign = -1 if facing > 0.0 else 1      # entering a solid: normal against the ray
+                    # The same crossing reported twice: a ray through an edge or vertex shared by two faces
+                    # (overlapping shells close together are separate crossings: their faces share nothing)
+                    duplicate = (last_t is not None and sign == last_sign and t - last_t < 10.0 * eps
+                                 and not corners[_index].isdisjoint(corners[last_index]))
+                    if not duplicate:
+                        before = winding
+                        winding += sign
+                        if before <= 0 < winding:
+                            inside_from = t
+                        elif winding <= 0 < before and inside_from is not None:
+                            length += t - inside_from
+                            inside_from = None
+                        last_t, last_sign, last_index = t, sign, _index
+                origin = base + direction * (t + eps)
             total += length
     return total * du * dw
 
