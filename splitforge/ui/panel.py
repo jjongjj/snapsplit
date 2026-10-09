@@ -57,27 +57,30 @@ class SPLITFORGE_UL_connectors(UIList):
         kind = iface(KIND_SHORT.get(item.kind, item.kind))
         side = iface("both sides") if item.kind == 'DOWEL' else f"{iface('pin')} {item.pin_side}"
         row.label(text=f"{index + 1} {kind}  {side}", translate=False)
-        if item.kind == 'CUSTOM' and custom_problem(item.custom_object):
+        if item.kind == 'CUSTOM' and custom_problem(item.custom_object, context):
             row.label(text="", icon='ERROR')
 
 
-# Custom mesh validation for drawing: (object name, mesh name, counts) -> message ("" = usable).
-# Plain strings only; recomputed when the mesh changes.
+# Custom mesh validation for drawing: key -> message ("" = usable). Plain strings only. The check uses
+# the evaluated mesh (modifiers applied), like Build; the key is a cheap fingerprint of that mesh.
 _CUSTOM_PROBLEMS = {}
 
 
-def custom_problem(obj):
-    """'' if ``obj`` is usable as a custom connector mesh, else the reason (cached for drawing)."""
+def custom_problem(obj, context=None):
+    """'' if ``obj`` is usable as a custom connector mesh (as Build sees it), else the reason (cached)."""
     if obj is None:
         return "no custom mesh object chosen"
     if obj.type != 'MESH':
         return f"custom connector '{obj.name}' is not a mesh object"
-    me = obj.data
-    key = (obj.name, me.name, len(me.vertices), len(me.edges), len(me.polygons))
+    depsgraph = (context or bpy.context).evaluated_depsgraph_get()
+    me = obj.evaluated_get(depsgraph).data
+    n = len(me.vertices)
+    probe = tuple(tuple(round(c, 6) for c in me.vertices[i].co) for i in sorted({0, n // 2, n - 1})) if n else ()
+    key = (obj.name, n, len(me.edges), len(me.polygons), probe)
     if key not in _CUSTOM_PROBLEMS:
         if len(_CUSTOM_PROBLEMS) > 64:
             _CUSTOM_PROBLEMS.clear()
-        _CUSTOM_PROBLEMS[key] = build.custom_shape_of(obj)[1]
+        _CUSTOM_PROBLEMS[key] = build.custom_shape_of(obj, depsgraph)[1]
     return _CUSTOM_PROBLEMS[key]
 
 

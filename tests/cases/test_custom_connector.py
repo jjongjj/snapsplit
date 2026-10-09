@@ -139,6 +139,22 @@ def run(ctx):
         ctx.metric(key, reports[-1][1])
     assert panel.custom_problem(None) == "no custom mesh object chosen"
 
+    # Panel and Build judge the same (evaluated) mesh: an open plane with Solidify is a closed solid,
+    # and switching the modifier off makes it unusable again (the panel check follows at once)
+    plane = mesh_object("SolidPlane", lambda bm: bmesh.ops.create_grid(bm, x_segments=2, y_segments=2, size=2.0))
+    assert "not a closed manifold" in panel.custom_problem(plane)
+    solid = plane.modifiers.new("solid", 'SOLIDIFY')
+    solid.thickness = 1.5
+    assert panel.custom_problem(plane) == "", panel.custom_problem(plane)
+    cube = cube_with_connector("Solid", 'CUSTOM', plane)
+    res = build.build(bpy.context, cube)
+    assert not res.warnings and all(lib.is_manifold(p) for p in parts_of("Solid").values()), res.warnings
+    solid.show_viewport = False
+    assert "not a closed manifold" in panel.custom_problem(plane)
+    lib.select_only([cube])
+    res = build.build(bpy.context, cube)
+    assert any("not a closed manifold" in w for w in res.warnings), res.warnings
+
     # The stack owner is not offered as its own custom mesh
     c0 = bpy.data.objects["Cu"].splitforge_stack.cuts[0].connectors[0]
     assert not ctx.module("model.props")._custom_poll(c0, bpy.data.objects["Cu"])
