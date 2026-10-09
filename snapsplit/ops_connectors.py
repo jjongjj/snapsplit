@@ -32,6 +32,7 @@ from bpy_extras import view3d_utils
 from .utils import ensure_collection, unit_mm, report_user, apply_modifier_data
 from .ops_split import warn_if_unapplied_transforms
 from .utils import _trf
+from .core import log
 from .utils import xray_acquire, xray_release
 from .seam_data import (
     SeamValidationError,
@@ -1986,8 +1987,8 @@ def _recalc_normals_outside(obj):
                 bm.free()
             obj.data.update()
     except Exception as ex:
-        print(f"[SnapSplit DEBUG] _recalc_normals_outside failed on "
-              f"'{getattr(obj, 'name', '?')}': {ex}")
+        log.debug(f"_recalc_normals_outside failed on "
+                  f"'{getattr(obj, 'name', '?')}': {ex}")
 
 
 
