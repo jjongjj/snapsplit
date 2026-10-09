@@ -436,3 +436,24 @@ def transform_bm(bm, matrix):
     if matrix.to_3x3().determinant() < 0.0:
         bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
     bm.normal_update()
+
+
+def shells(bm):
+    """Connected shells of ``bm`` as lists of vertices (edge-connected flood fill)."""
+    seen = set()
+    out = []
+    for v in bm.verts:
+        if v in seen:
+            continue
+        seen.add(v)
+        stack, shell = [v], []
+        while stack:
+            cur = stack.pop()
+            shell.append(cur)
+            for e in cur.link_edges:
+                other = e.other_vert(cur)
+                if other not in seen:
+                    seen.add(other)
+                    stack.append(other)
+        out.append(shell)
+    return out

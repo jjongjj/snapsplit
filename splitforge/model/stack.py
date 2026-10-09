@@ -12,9 +12,9 @@ import bpy
 from mathutils import Vector
 
 from ..core import meshlib, naming
-from ..cuts import plane
+from ..cuts import plane, stroke
 
-CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "gap_mm", "cap", "distribution",
+CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "distribution",
               "connector_count", "connector_rows", "margin_pct")
 CONNECTOR_FIELDS = ("enabled", "kind", "u", "v", "rotation_deg", "width_mm", "height_mm", "length_mm",
                     "pin_side", "clearance_mm")
@@ -80,6 +80,43 @@ def add_cut(obj, origin, normal, tangent=None, name=None):
     return stack.active_index
 
 
+def set_stroke(cut, points, direction):
+    """Store a stroke (object-local points and extrusion direction) on ``cut``.
+
+    The display frame (origin/normal/tangent) is the seam frame in the middle of
+    the stroke. Raises stroke.StrokeError for a degenerate stroke.
+    """
+    co, n, t = stroke.curve_frame(points, direction)
+    cut.kind = 'STROKE'
+    cut.points.clear()
+    for p in points:
+        cut.points.add().co = Vector(p)
+    cut.direction = Vector(direction).normalized()
+    cut.origin = co
+    cut.normal = n
+    cut.tangent = t
+
+
+def stroke_points(cut):
+    """Object-local stroke points of a STROKE cut as Vectors."""
+    return [Vector(p.co) for p in cut.points]
+
+
+def add_stroke_cut(obj, points, direction, name=None):
+    """Append a stroke cut (object-local points + direction) and make it active. Returns its index."""
+    stack = get_stack(obj)
+    cut = stack.cuts.add()
+    try:
+        set_stroke(cut, points, direction)
+    except stroke.StrokeError:
+        stack.cuts.remove(len(stack.cuts) - 1)
+        raise
+    cut.uid = _new_uid(stack)
+    cut.name = name or f"Stroke {len(stack.cuts)}"
+    stack.active_index = len(stack.cuts) - 1
+    return stack.active_index
+
+
 def add_axis_cut(obj, axis, offset, name=None):
     """Add a cut perpendicular to a world axis through the bbox center + offset (BU)."""
     origin, normal, tangent = plane.axis_plane(obj.matrix_world, world_bbox_center(obj), axis, offset)
@@ -126,6 +163,8 @@ def duplicate_cut(obj, index=-1):
     dst = stack.cuts.add()
     for f in CUT_FIELDS:
         setattr(dst, f, getattr(src, f))
+    for p in src.points:
+        dst.points.add().co = p.co
     for c in src.connectors:
         copy_connector(c, dst.connectors.add())
     dst.uid = _new_uid(stack)

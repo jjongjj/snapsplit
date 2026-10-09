@@ -9,6 +9,7 @@ from bpy.props import BoolProperty, FloatProperty, IntProperty
 from bpy.types import Operator
 
 from ..connectors import auto
+from ..cuts import build
 from ..core import naming
 from ..model import stack as stack_api
 
@@ -49,11 +50,15 @@ class SPLITFORGE_OT_connector_add_auto(_CutOp, Operator):
         if cut is None:
             return {'CANCELLED'}
         s = _settings(context)
-        res = auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
-                            s.new_connector_height_mm, s.new_connector_length_mm, self.replace)
+        try:
+            res = auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
+                                s.new_connector_height_mm, s.new_connector_length_mm, self.replace)
+        except build.BuildError as ex:
+            self.report({'ERROR'}, str(ex))
+            return {'CANCELLED'}
         if res.dropped:
-            self.report({'WARNING'}, f"{res.dropped} position(s) dropped: the connector would break through "
-                                     "the surface there (smaller connector or fewer per seam may fit)")
+            self.report({'WARNING'}, f"{res.dropped} position(s) dropped: {res.describe()} "
+                                     "(a smaller connector or fewer per seam may fit)")
         if not res.added:
             self.report({'WARNING'}, "No connector fits on this cut (or it does not cross the object)")
             return {'CANCELLED'}

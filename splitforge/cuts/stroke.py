@@ -45,6 +45,9 @@ MAX_POINTS = 400
 SMOOTH_ITERATIONS = 2
 # Margin of the cutter rectangle/depth beyond the object: fraction of its bbox diagonal
 MARGIN_FRACTION = 0.1
+# Ribbon surfaces for distance queries: face height <= RIBBON_ASPECT x segment length
+RIBBON_ASPECT = 6.0
+RIBBON_MAX_SLICES = 64
 
 
 class StrokeError(ValueError):
@@ -420,13 +423,23 @@ class StrokeCutter:
         return prism(poly, self.frame, self.z0, self.z1)
 
     def ribbon(self, bm=None, curve=None):
-        """Open ribbon surface: ``curve`` (default: the extended curve) swept along d over the depth range."""
+        """Open ribbon surface: ``curve`` (default: the extended curve) swept along d over the depth range.
+
+        The depth is sliced so faces are at most RIBBON_ASPECT times taller than
+        the curve's typical segment: Blender's closest-point queries (BVHTree,
+        float32) are off by ~0.01 mm on 1:100 sliver triangles.
+        """
         bm = bm if bm is not None else bmesh.new()
         curve = self.extended if curve is None else curve
-        lo = [bm.verts.new(self.frame.to3d(x, y, self.z0)) for x, y in curve]
-        hi = [bm.verts.new(self.frame.to3d(x, y, self.z1)) for x, y in curve]
-        for i in range(len(lo) - 1):
-            bm.faces.new((lo[i], lo[i + 1], hi[i + 1], hi[i]))
+        lengths = sorted(math.dist(a, b) for a, b in zip(curve, curve[1:]))
+        typical = max(lengths[len(lengths) // 2], 1e-9)
+        slices = max(1, min(RIBBON_MAX_SLICES, math.ceil((self.z1 - self.z0) / (RIBBON_ASPECT * typical))))
+        rows = [[bm.verts.new(self.frame.to3d(x, y, self.z0 + (self.z1 - self.z0) * k / slices))
+                 for x, y in curve] for k in range(slices + 1)]
+        for lo, hi in zip(rows, rows[1:]):
+            for i in range(len(lo) - 1):
+                bm.faces.new((lo[i], lo[i + 1], hi[i + 1], hi[i]))
+        bm.normal_update()
         return bm
 
     # --- point queries --------------------------------------------------------

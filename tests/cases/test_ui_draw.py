@@ -7,6 +7,8 @@ The stand-in also checks that every ``prop()`` names an existing property and ev
 silently. The overlay geometry (gpu draw handler) is computed for the same states.
 """
 
+import math
+
 import bpy
 
 import lib
@@ -118,9 +120,27 @@ def run(ctx):
     assert ("operator", "splitforge.export_parts") in log
     assert any(e[0] == "label" and "part(s) in SplitForge_Build_UiCube" in e[1] for e in log), log
 
+    # A stroke cut: Redraw button instead of the plane fields, ribbon + connectors in the overlay
+    lib.select_only([cube])
+    cube.hide_set(False)
+    lib.run_op(bpy.ops.splitforge.stack_add_stroke, direction=(0.0, 1.0, 0.0),
+               points=[{"name": "", "co": (-26.0 + 52.0 * i / 19, 0.0, 6.0 + 3.0 * math.sin(i / 3.0))}
+                       for i in range(20)])
+    lib.run_op(bpy.ops.splitforge.connector_add_auto)
+    log = _draw_all("stroke")
+    assert ("operator", "splitforge.stack_add_stroke") in log, log
+    assert any(e[0] == "label" and e[1].startswith("Stroke:") for e in log), log
+    assert ("operator", "splitforge.cut_adjust_plane") not in log
+    stroke_cut = cube.splitforge_stack.cuts[-1]
+    tris, segs, matrix_fn = overlay.stroke_ribbon(cube, stroke_cut)
+    assert len(tris) == 6 * (len(stroke_cut.points) - 1) and segs and matrix_fn is not None
+    fills, lines = overlay.geometry(bpy.context)
+    assert len(fills) == 3 and len(lines) == 3 + n_conn + len(stroke_cut.connectors), (len(fills), len(lines))
+
     cube.splitforge_stack.mode = 'EASY'
     log = _draw_all("easy")
     assert ("operator", "splitforge.easy_cut") in log and ("hidden", "SPLITFORGE_PT_connectors") in log
+    assert ("prop", "easy_gap_mm") in log and log.count(("operator", "splitforge.stack_add_stroke")) == 1
 
     bpy.context.scene.splitforge.show_overlay = False
     assert overlay.geometry(bpy.context) == ([], [])
