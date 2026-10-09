@@ -30,6 +30,10 @@ remaining shared entries. Tooltips (descriptions) are not translated yet.
 
 DICTIONARY = {
     "de_DE": {
+        ("*", "Dowel layout"): "Dübel-Anordnung",
+        ("*", "Flat"): "Liegend",
+        ("*", "Upright"): "Stehend",
+        ("*", "At assembly position"): "In Einbaulage",
         ("*", "Accurate"): "Genau",
         ("*", "Active connector"): "Aktiver Verbinder",
         ("*", "Active cut"): "Aktiver Schnitt",
@@ -266,6 +270,10 @@ DICTIONARY = {
         ("*", "Line"): "Črta",
     },
     "ko_KR": {
+        ("*", "Dowel layout"): "도웰 배치",
+        ("*", "Flat"): "눕혀서",
+        ("*", "Upright"): "세워서",
+        ("*", "At assembly position"): "조립 위치",
         ("*", "Accurate"): "정확",
         ("*", "Active connector"): "활성 커넥터",
         ("*", "Active cut"): "활성 컷",

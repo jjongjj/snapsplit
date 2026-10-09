@@ -7,6 +7,9 @@
   the source's +X side, resting on its lowest Z), chamfered ends narrower, manifold;
   the dowel volume fits the two sockets with clearance on every side (assembled check:
   the dowel moved to the connector position sits inside both sockets, nowhere in a part).
+- Layouts (Settings > Dowel layout): Flat (default), Upright (standing on an end, same row),
+  At assembly position (in its sockets, clear of both parts); switching moves existing dowels;
+  Export writes them printable in every layout (flat, or upright when chosen).
 - Export writes the dowel file too; Rebuild replaces it (no leak), switching the type to a
   pin removes it, Clear Build removes it; dowel parts are numbered per dowel.
 """
@@ -52,15 +55,16 @@ def run(ctx):
     assert dowel.get("splitforge_dowel") == "Cut Z connector 1", dowel.get("splitforge_dowel")
 
     # Dimensions and placement: flat along X, next to the cube, on its floor
-    xs = [v.co.x for v in dowel.data.vertices]
-    ys = [v.co.y for v in dowel.data.vertices]
-    zs = [v.co.z for v in dowel.data.vertices]
+    world = [dowel.matrix_world @ v.co for v in dowel.data.vertices]
+    xs = [co.x for co in world]
+    ys = [co.y for co in world]
+    zs = [co.z for co in world]
     lib.assert_close(max(xs) - min(xs), LEN, abs_=0.05, msg="dowel length")
     lib.assert_close(max(ys) - min(ys), D, abs_=0.05, msg="dowel diameter")
     lib.assert_close(max(zs) - min(zs), D, abs_=0.05, msg="dowel diameter")
     assert min(xs) > 20.0 + 4.9, min(xs)
     lib.assert_close(min(zs), -20.0, abs_=1e-4, msg="resting on the source's lowest Z")
-    end = [v.co for v in dowel.data.vertices if abs(v.co.x - min(xs)) < 1e-6]
+    end = [co for co in world if abs(co.x - min(xs)) < 1e-6]
     end_r = max((Vector((0, co.y, co.z)) - Vector((0, sum(ys) / len(ys), sum(zs) / len(zs)))).length for co in end)
     lib.assert_close(end_r, D / 2 - CH, abs_=0.02, msg="chamfered end")
     lib.assert_close(lib.volume(dowel), 3.14159 * (D / 2) ** 2 * LEN, rel=0.05, msg="dowel volume")
@@ -76,8 +80,8 @@ def run(ctx):
         bm.free()
     # Close the gap as on assembly: A moves down by the gap; the dowel's lower half is in B, upper in A
     worst = []
-    for v in dowel.data.vertices:
-        q = to_place @ v.co
+    for co in world:
+        q = to_place @ co
         if q.z >= 0.0:
             target, q2 = a, q + Vector((0, 0, GAP / 2))
         else:
@@ -85,6 +89,61 @@ def run(ctx):
         worst.append(fit.depth_inside(bvh[target.name], q2))
     assert max(worst) < -C * 0.5, f"dowel reaches into a part: {max(worst)}"
     ctx.metric("assembled_gap", f"{-max(worst):.3f}")
+
+    # Layouts: Upright stands on an end in the same row, At assembly position sits in the sockets;
+    # changing the setting moves the existing dowel at once (no rebuild)
+    settings = bpy.context.scene.splitforge
+
+    def world_box(o):
+        pts = [o.matrix_world @ v.co for v in o.data.vertices]
+        return Vector([min(p[i] for p in pts) for i in range(3)]), Vector([max(p[i] for p in pts) for i in range(3)])
+
+    settings.dowel_layout = 'UPRIGHT'
+    lo, hi = world_box(dowel)
+    lib.assert_close(hi.z - lo.z, LEN, abs_=0.05, msg="upright: length along Z")
+    lib.assert_close(hi.x - lo.x, D, abs_=0.05, msg="upright: diameter along X")
+    lib.assert_close(lo.z, -20.0, abs_=1e-4, msg="upright: on the source's lowest Z")
+    assert lo.x > 20.0 + 4.9, lo.x
+    settings.dowel_layout = 'ASSEMBLED'
+    lo, hi = world_box(dowel)
+    assert ((lo + hi) / 2 - Vector((4.0, -3.0, 0.0))).length < 1e-4, (lo + hi) / 2
+    lib.assert_close(hi.z - lo.z, LEN, abs_=0.05, msg="assembled: along the cut normal")
+    # In its sockets (gap open: each half reaches L/2 - gap/2 into its part, with clearance around it)
+    for co in (dowel.matrix_world @ v.co for v in dowel.data.vertices):
+        target = a if co.z >= 0.0 else b
+        assert fit.depth_inside(bvh[target.name], co) < -C * 0.5, ("assembled dowel inside a part", tuple(co))
+    # A rebuild uses the chosen layout
+    lib.select_only([bpy.data.objects["Dw"]])
+    lib.run_op(bpy.ops.splitforge.build)
+    lo, hi = world_box(parts_of("Dw")["Dowel_1"])
+    assert ((lo + hi) / 2 - Vector((4.0, -3.0, 0.0))).length < 1e-4, ("rebuilt in the assembled layout", lo, hi)
+
+    # Export writes printable dowels in every layout: lying flat, or standing upright when chosen;
+    # the dowel stays where the layout put it
+    for layout, z_extent in (('FLAT', D), ('UPRIGHT', LEN), ('ASSEMBLED', D)):
+        settings.dowel_layout = layout
+        lib.select_only([parts_of("Dw")["A"]])
+        dw = parts_of("Dw")["Dowel_1"]
+        before = dw.matrix_world.copy()
+        out = os.path.join(bpy.app.tempdir, f"dowel_{layout}")
+        shutil.rmtree(out, ignore_errors=True)
+        lib.run_op(bpy.ops.splitforge.export_parts, directory=out, formats={'STL'})
+        after = parts_of("Dw")["Dowel_1"].matrix_world
+        assert max(abs(after[i][j] - before[i][j]) for i in range(4) for j in range(4)) < 1e-5, \
+            f"{layout}: export moved the dowel"
+        names = set(bpy.data.objects.keys())
+        ctx.module("core.compat").import_stl(os.path.join(out, "Dw_Dowel_1.stl"))
+        imported = [bpy.data.objects[k] for k in set(bpy.data.objects.keys()) - names][0]
+        lo, hi = world_box(imported)
+        lib.assert_close(hi.z - lo.z, z_extent, abs_=0.05, msg=f"{layout}: exported pose")
+        lib.assert_close(lo.z, -20.0, abs_=1e-3, msg=f"{layout}: exported on the bed level")
+        assert len(imported.data.polygons) > 0
+        mesh = imported.data
+        bpy.data.objects.remove(imported)
+        bpy.data.meshes.remove(mesh)
+    settings.dowel_layout = 'FLAT'
+    lib.select_only([bpy.data.objects["Dw"]])
+    a, b = parts_of("Dw")["A"], parts_of("Dw")["B"]
 
     # Export includes the dowel
     out = os.path.join(bpy.app.tempdir, "dowel_export")
@@ -102,8 +161,8 @@ def run(ctx):
     assert len(bpy.data.objects) == n_objects + 1 and len(bpy.data.meshes) == n_meshes + 1
     assert not [m for m in bpy.data.meshes if m.users == 0]
     d1, d2 = parts_of("Dw")["Dowel_1"], parts_of("Dw")["Dowel_2"]
-    y1 = [v.co.y for v in d1.data.vertices]
-    y2 = [v.co.y for v in d2.data.vertices]
+    y1 = [(d1.matrix_world @ v.co).y for v in d1.data.vertices]
+    y2 = [(d2.matrix_world @ v.co).y for v in d2.data.vertices]
     assert min(y2) > max(y1), "dowels side by side"
 
     # A pin instead: the dowel parts go away on rebuild; Clear Build removes everything

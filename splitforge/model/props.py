@@ -69,6 +69,11 @@ def _redraw(_self, context):
             area.tag_redraw()
 
 
+def _dowel_layout_changed(self, context):
+    from ..cuts import build
+    build.apply_dowel_layout(self.dowel_layout)
+
+
 def _custom_poll(self, obj):
     """Custom connector meshes: any mesh object except the stack owner itself."""
     return obj.type == 'MESH' and obj != self.id_data
@@ -201,6 +206,14 @@ class SPLITFORGE_PG_Settings(PropertyGroup):
                                description="Material removed along an Easy cut (kerf)")
     easy_connector_count: IntProperty(name="Connectors", default=2, min=0, max=16,
                                       description="Pins added along the seam (0 = none)")
+    dowel_layout: EnumProperty(name="Dowel layout", default='FLAT', update=_dowel_layout_changed, items=[
+        ('FLAT', "Flat", "Dowel parts lie along X next to the object (strongest print: layers run along "
+         "the dowel)"),
+        ('UPRIGHT', "Upright", "Dowel parts stand on an end next to the object (round section exact; "
+         "weaker across the layers)"),
+        ('ASSEMBLED', "At assembly position", "Dowel parts sit in their sockets (preview); Export writes "
+         "them lying flat"),
+    ], description="Where Build puts the separate dowel parts")
     export_directory: StringProperty(name="Folder", subtype='DIR_PATH', default="//parts/")
     export_formats: EnumProperty(name="Formats", options={'ENUM_FLAG'}, default={'STL'}, items=[
         ('STL', "STL", "Binary STL"), ('OBJ', "OBJ", "Wavefront OBJ"), ('FBX', "FBX", "Autodesk FBX")])

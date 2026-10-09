@@ -338,6 +338,7 @@ class SPLITFORGE_PT_settings(_Base, Panel):
         row.prop(s, "material", text="")
         row.prop(s, "clearance_mm")
         layout.prop(s, "boolean_quality")
+        layout.prop(s, "dowel_layout")
 
 
 classes = (

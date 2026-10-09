@@ -78,7 +78,11 @@ class SPLITFORGE_OT_export_parts(Operator):
         selected = [o.name for o in context.selected_objects]
         active = view_layer.objects.active.name if view_layer.objects.active else None
         written = []
+        # Dowel parts are written in their print pose (Flat, or Upright when chosen), whatever the layout
+        print_pose = build.print_layout(settings.dowel_layout)
+        placed = {p.name: p.matrix_world.copy() for p in parts if p.get(naming.PROP_DOWEL) is not None}
         try:
+            build.apply_dowel_layout(print_pose, [p for p in parts if p.name in placed])
             for part in parts:
                 for o in context.selected_objects:
                     o.select_set(False)
@@ -89,6 +93,10 @@ class SPLITFORGE_OT_export_parts(Operator):
                     compat.export_selected(fmt, path, scale)
                     written.append(path)
         finally:
+            for name, m in placed.items():
+                o = bpy.data.objects.get(name)
+                if o is not None:
+                    o.matrix_world = m
             for o in context.selected_objects:
                 o.select_set(False)
             for name in selected:

@@ -58,6 +58,7 @@ class DowelSpec:
     diameter: float
     length: float
     chamfer: float
+    matrix: Matrix = None     # connector frame (Z = dowel axis, origin on the seam): assembly position
 
 
 def _containing_piece(bvhs, point):
@@ -176,7 +177,7 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
             finally:
                 joined.free()
         if solids.dowel is not None:
-            out.dowels.append(DowelSpec(spec.label, *solids.dowel))
+            out.dowels.append(DowelSpec(spec.label, *solids.dowel, matrix=spec.matrix.copy()))
     return out
 
 

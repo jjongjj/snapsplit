@@ -509,32 +509,80 @@ def connector_specs(obj, cuts, scene, settings, specs=None, warnings=None, depsg
 # Dowel parts
 # ---------------------------------------------------------------------------
 
-# Dowel parts lie flat (axis along world X) in a row next to the source: DOWEL_MARGIN_MM beyond
-# its +X side, DOWEL_SPACING_MM apart along Y, resting on the source's lowest Z
+# Dowel layouts (Scene setting ``dowel_layout``). The dowel mesh is kept in its own frame (axis along
+# local X, centered on the origin); the object matrix places it:
+# - FLAT (default): lying along world X in a row next to the source, DOWEL_MARGIN_MM beyond its +X
+#   side, DOWEL_SPACING_MM apart along Y, resting on the source's lowest Z. The layer lines then run
+#   along the dowel, so shear at the seam does not split it between layers.
+# - UPRIGHT: standing on an end (axis along world Z) in the same row, on the source's lowest Z
+#   (round section exact in the layer plane; weaker in shear across the layers).
+# - ASSEMBLED: in its sockets (connector frame), a preview of the assembly; Export writes it in
+#   the FLAT pose, so the file is printable in every layout.
+# All three poses are stored on the part, so changing the setting moves existing dowels at once.
 DOWEL_MARGIN_MM = 5.0
 DOWEL_SPACING_MM = 3.0
+DOWEL_LAYOUTS = ('FLAT', 'UPRIGHT', 'ASSEMBLED')
+# Mesh axis (local X) -> local Z of a frame
+_X_TO_Z = Matrix.Rotation(-math.pi * 0.5, 4, 'Y')
 
 
-def dowel_matrix(dowel, index, source_bounds, scene):
-    """World matrix of dowel part ``index`` (local Z = dowel axis -> world X), see DOWEL_* above."""
+def dowel_poses(dowel, index, source_bounds, scene):
+    """{layout: object matrix} of dowel part ``index`` (see DOWEL_LAYOUTS above)."""
     (x0, x1, y0, y1, z0), _z1 = source_bounds
     mm = units.mm_to_scene(1.0, scene)
     r = dowel.diameter * 0.5
-    center = Vector((x1 + DOWEL_MARGIN_MM * mm + dowel.length * 0.5,
-                     y0 + r + index * (dowel.diameter + DOWEL_SPACING_MM * mm), z0 + r))
-    return Matrix.Translation(center) @ Matrix.Rotation(math.pi * 0.5, 4, 'Y')
+    y = y0 + r + index * (dowel.diameter + DOWEL_SPACING_MM * mm)
+    flat = Matrix.Translation((x1 + DOWEL_MARGIN_MM * mm + dowel.length * 0.5, y, z0 + r))
+    upright = Matrix.Translation((x1 + DOWEL_MARGIN_MM * mm + r, y, z0 + dowel.length * 0.5)) @ _X_TO_Z
+    assembled = (dowel.matrix @ _X_TO_Z) if dowel.matrix is not None else flat
+    return {'FLAT': flat, 'UPRIGHT': upright, 'ASSEMBLED': assembled}
 
 
-def dowel_object(name, dowel, matrix):
-    """New (unlinked) mesh object of a dowel part; the mesh is in world space, identity transform."""
+def _pose_prop(layout):
+    return f"{naming.PROP_DOWEL}_{layout.lower()}"
+
+
+def dowel_object(name, dowel, poses, layout='FLAT'):
+    """New (unlinked) mesh object of a dowel part: mesh along local X, the ``layout`` pose as its
+    matrix, every pose stored as a custom property (16 floats)."""
     bm = bmesh.new()
     try:
-        conn_shapes.dowel_bmesh(bm, dowel.diameter, dowel.length, dowel.chamfer, matrix)
+        conn_shapes.dowel_bmesh(bm, dowel.diameter, dowel.length, dowel.chamfer, Matrix.Rotation(math.pi * 0.5, 4, 'Y'))
         mesh = bpy.data.meshes.new(name)
         bm.to_mesh(mesh)
     finally:
         bm.free()
-    return bpy.data.objects.new(name, mesh)
+    part = bpy.data.objects.new(name, mesh)
+    for key, m in poses.items():
+        part[_pose_prop(key)] = [x for row in m for x in row]
+    part.matrix_world = poses.get(layout, poses['FLAT'])
+    return part
+
+
+def dowel_pose(part, layout):
+    """Stored pose matrix of a dowel part for ``layout`` (None if the part has none)."""
+    values = part.get(_pose_prop(layout))
+    if values is None or len(values) != 16:
+        return None
+    return Matrix([values[i:i + 4] for i in range(0, 16, 4)])
+
+
+def print_layout(layout):
+    """The layout whose pose a dowel is exported in: UPRIGHT as chosen, otherwise FLAT."""
+    return 'UPRIGHT' if layout == 'UPRIGHT' else 'FLAT'
+
+
+def apply_dowel_layout(layout, objects=None):
+    """Move every dowel part (or those in ``objects``) to its stored ``layout`` pose. Returns the count."""
+    moved = 0
+    for o in (objects if objects is not None else bpy.data.objects):
+        if o.get(naming.PROP_DOWEL) is None:
+            continue
+        m = dowel_pose(o, layout)
+        if m is not None:
+            o.matrix_world = m
+            moved += 1
+    return moved
 
 
 # ---------------------------------------------------------------------------
@@ -651,6 +699,7 @@ def build_steps(obj):
                                  context.evaluated_depsgraph_get())
     barriers = {s.uid: s.barrier() for s in specs}
     quality = settings.boolean_quality if settings is not None else 'AUTO'
+    dowel_layout = settings.dowel_layout if settings is not None else 'FLAT'
     cut_ids = ",".join(c.uid for c in cuts)
     max_step = units.mm_to_scene(FIT_STEP_MM, scene)
     del stack, cuts, settings
@@ -715,7 +764,7 @@ def build_steps(obj):
         for k, dowel in enumerate(assignment.dowels):
             name = f"{obj.name}{naming.DOWEL_SUFFIX}{k + 1}"
             names.append(name)
-            part = dowel_object(name, dowel, dowel_matrix(dowel, k, source_bounds, scene))
+            part = dowel_object(name, dowel, dowel_poses(dowel, k, source_bounds, scene), dowel_layout)
             part[naming.PROP_SOURCE] = obj.name
             part[naming.PROP_SOURCE_OBJECT] = obj
             part[naming.PROP_CUT_IDS] = cut_ids
