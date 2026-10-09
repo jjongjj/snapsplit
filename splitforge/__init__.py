@@ -25,7 +25,7 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 bl_info = {
     "name": "SplitForge",
     "author": "SplitForge contributors; SnapSplit by Christoph Medicus",
-    "version": (0, 3, 0),
+    "version": (0, 4, 0),
     "blender": (5, 2, 0),
     "location": "View3D > N-Panel > SplitForge",
     "description": (

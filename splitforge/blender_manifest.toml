@@ -5,7 +5,7 @@ schema_version = "1.0.0"
 # name: renaming means changing `id`/`name` here, the package folder name and the
 # constants in core/naming.py.
 id = "splitforge"
-version = "0.3.0-dev"
+version = "0.4.0"
 name = "SplitForge"
 tagline = "Non-destructive cut stacks and connectors for 3D printing"
 # SplitForge fork maintainer; the upstream author is credited in `copyright` below
@@ -20,4 +20,15 @@ license = ["SPDX:GPL-3.0-or-later"]
 copyright = [
   "2026 Christoph Medicus (SnapSplit)",
   "2026 SplitForge contributors",
+]
+
+[build]
+# Release zip: the add-on only (no caches, editor or OS clutter)
+paths_exclude_pattern = [
+  "__pycache__/",
+  "*.pyc",
+  "/.git/",
+  "*.blend1",
+  ".DS_Store",
+  "Thumbs.db",
 ]
