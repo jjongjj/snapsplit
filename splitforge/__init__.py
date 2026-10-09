@@ -48,7 +48,7 @@ from . import localization  # translation data (DICTIONARY), no register() of it
 from . import prefs
 from .model import props as model_props
 from .ops import (ops_stack, ops_cut_plane, ops_cut_stroke, ops_cut_points, ops_connector, ops_connector_click,
-                  ops_build, ops_export)
+                  ops_build, ops_export, ops_fix)
 from .ui import overlay as ui_overlay
 from .ui import panel as ui_panel
 
@@ -67,6 +67,7 @@ _modules = [
     ops_connector_click,
     ops_build,
     ops_export,
+    ops_fix,
     ui_overlay,
     ui_panel,
 ]

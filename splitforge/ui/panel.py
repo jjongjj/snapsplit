@@ -142,16 +142,40 @@ class _Base:
     bl_category = naming.UI_CATEGORY
 
 
+def _check_row(col, ok, text, fix=None, icon_bad='ERROR', translate=True):
+    row = col.row(align=True)
+    row.label(text=text, icon='CHECKMARK' if ok else icon_bad, translate=translate)
+    if not ok and fix:
+        row.operator(OP(fix), text="Fix")
+
+
 def draw_checks(context, layout, obj):
-    """Live print checks (cheap ones only; the full mesh scan is the Check Mesh button)."""
+    """Print checks with one-click fixes: transforms and units live; the mesh scan (holes, normals,
+    duplicates) from the last Check Mesh while the mesh is unchanged (core/validate.last_report)."""
     box = layout.box()
-    row = box.row(align=True)
-    scale_ok = validate.transform_is_applied(obj)
-    mm_ok = units.is_mm_scene(context.scene)
-    row.label(text="Transforms", icon='CHECKMARK' if scale_ok else 'ERROR')
-    row.label(text=tr("1 unit = {mm} mm", mm=f"{units.bu_to_mm_factor(context.scene):g}"), translate=False,
-              icon='CHECKMARK' if mm_ok else 'INFO')
-    row.operator(OP("validate"), text="", icon='VIEWZOOM')
+    col = box.column(align=True)
+    head = col.row(align=True)
+    head.label(text="Print checks")
+    head.operator(OP("validate"), text="Check Mesh", icon='VIEWZOOM')
+    _check_row(col, validate.transform_is_applied(obj), "Rotation & scale applied", "fix_transforms")
+    _check_row(col, units.is_mm_scene(context.scene),
+               tr("1 unit = {mm} mm", mm=f"{units.bu_to_mm_factor(context.scene):g}"), "fix_units",
+               icon_bad='INFO', translate=False)
+    rep = validate.last_report(obj)
+    if rep is None:
+        col.label(text="Mesh not checked yet", icon='QUESTION')
+        return
+    _check_row(col, rep.open_edges == 0 and not rep.loose_geom,
+               "Closed (no holes)" if rep.open_edges == 0 and not rep.loose_geom else
+               tr("{n} open edge(s), {m} loose", n=rep.open_edges, m=rep.loose_verts + rep.loose_edges),
+               "fix_holes", translate=rep.open_edges == 0 and not rep.loose_geom)
+    _check_row(col, rep.normals_ok, "Normals point outward", "fix_normals")
+    _check_row(col, not rep.duplicates,
+               "No duplicate vertices" if not rep.duplicates else tr("{n} duplicate vertices", n=rep.duplicates),
+               "fix_merge", translate=not rep.duplicates)
+    if rep.multi_edges:
+        _check_row(col, False, tr("{n} edge(s) with 3+ faces: fix in Edit Mode", n=rep.multi_edges),
+                   translate=False)
 
 
 def draw_easy(context, layout):
