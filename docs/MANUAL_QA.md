@@ -276,10 +276,51 @@ headless 적대 케이스(검증자 스크래치, 커밋 안 함): 컷 3개(Z + 
 
 ---
 
+## P2 곡선 컷 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop 29cd845)
+
+독립 검증자(verifier), 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa7/`, 같은 안전 규칙(MCP undo·참조 보관·타이머·프리퍼런스 리셋 없음,
+MCP 애드온 미변경). Millimeters + Unit Scale 0.001. 마우스로 그리기는 MCP로 할 수 없으므로 스트로크는 오퍼레이터
+`splitforge.stack_add_stroke(points=…, direction=(0,1,0))`(레코드 API)로 만들었다 — 실제 LMB 드래그·Shift·Enter·Esc는 `--gui` p2_stroke가 담당.
+
+1. 재로드(`qa7/reload.py`): `bl_ext.splitforge_dev.splitforge*` 40개 purge 후 enable, 로드 경로 `C:\code\snapsplit-develop\splitforge`, `cuts.stroke` 로드.
+2. 40 mm 큐브(`QA7_Cube`, x=−40)에 S자(진폭 7, 점 50 → 정리 후 147점, 방향 +Y), gap 0.5, Distribute 3 → 시임 위 3개
+   (u −15.45/−0.07/15.30). Build(`qa7/scenario.py`): 2파트 매니폴드(31853.6 + 31206.0 = 63059.6 mm³ = 64000 − 갭 − 핀/소켓 차),
+   불리언 EXACT×4(폴백 없음), 파트 관입 0, 경고 0, 원본 해시 불변·숨김·모디파이어 0, `_SplitForge_*` 잔존 0, 고아 메쉬 0.
+3. 구멍 메운 Suzanne(눈 셸 포함, `QA7_Monkey`, 3셸 17636.6 mm³), 주둥이 아래 S자(z −6, gap 0.5): 2파트 매니폴드, EXACT_SELF로 시작
+   (소스 셸 교차 감지), 정보 "2 separate shell(s) not crossed by any cut stay whole in the part that contains them", 눈은 위쪽 파트 A
+   (EXACT_SELF가 머리와 합침, A 1셸), 부피 합 17121.2(= 원본 − 눈/머리 겹침 − 갭), 관입 0, 원본 불변. 여기서는 Distribute가 0개
+   ("2 would break through the surface, 1 no room" — 주둥이 단면이 얇음, 정상 거부).
+4. 이마 S자(`QA7_Monkey2`, z 13, gap 0.5): Distribute 1개(2개 "too close"), Build 2파트 매니폴드·관입 0·같은 눈 정보, 커넥터 UNION은
+   EXACT_SELF "not manifold" → MANIFOLD 폴백(체인이 라이브에서 동작), DIFFERENCE EXACT_SELF. 파트 A에 브로 위 작은 섬 2개(컷 위쪽의
+   눈썹 돌기, 기하학상 정상).
+5. 스크린샷: 큐브 S 리본 오버레이(주황 리본 + 노란 커넥터 원)와 패널("Stroke 1", "Gap 0.5 mm, 1 connector(s)", "Stroke: 124 points",
+   "Redraw in Viewport", 커넥터 U/V, Rebuild, "2 part(s)") [리본+패널](qa/p2_live_52_cube_ribbon_panel.png),
+   Suzanne 리본 [Suzanne](qa/p2_live_52_monkey_ribbon.png), 분해 표시한 큐브 파트(B의 곡면 시임에 소켓 구멍)
+   [큐브 파트](qa/p2_live_52_cube_parts.png), 눈이 위쪽 파트에 남은 Suzanne 파트 [Suzanne 파트](qa/p2_live_52_monkey_parts.png).
+   (패널은 `wm.call_panel` 팝업이라 열린 채 남아 Monkey2 스택을 보여 줌.)
+
+headless 적대 케이스(검증자 스크래치, 커밋 안 함): 지그재그·0.3 mm 헤어핀(갭 0/0.1은 빌드, 갭 0.5/3은 "bends too sharply" 오류·변경 없음),
+넓은 U(양 끝이 같은 변으로), 0.5 mm 짧은 스트로크(직선 연장), 물체 밖에서 시작해 안에서 끝나는 스트로크 → 모두 2파트 매니폴드·관입 0·원본 불변·
+임시 데이터 0. 물체 밖 스트로크 "does not cross", 닫힌 고리 "crosses itself", 거의 닫힌 고리·나선 "straight extension crosses"(보수적 거부).
+회전·비균일 스케일·이동한 오브젝트에서 컷이 그린 월드 위치(z −25.000)에 정확히. Suzanne `use_self=False` EXACT 빈 결과 재현(504/2010/8040면 모두
+면 0, EXACT_SELF·MANIFOLD는 정상) — 원인 규명 확인. 전부 실패 주입 → BuildError, 원본·오브젝트·메쉬·컬렉션 수 불변.
+
+열린 항목:
+- [중간~낮음] D9: 곡선 컷 쌍 검증 허용치(4 % + 갭)가 셸 교차가 없는 경우에도 적용된다. 큐브 S자에서 한쪽 결과를 3 %·3.5 %·**5 %** 부피를 잃게
+  주입해도 모두 통과(경고 없음, 합 61493 vs 정상 ~63060). Suzanne 눈 셸 하나(~2 %)를 잃는 결과도 걸러지지 않는다. 제안: 셸 교차가 없으면 허용치를 0.1 % 수준으로.
+- [낮음~중간] D10: 곡선 컷 양쪽이 VOXEL 폴백으로만 성공해도 Build 경고가 없다(`_stroke_split`이 `res.message`를 warnings에 넣지 않음; 커넥터 불리언은 넣음).
+  모듈 설명("reported as a warning")과 다름.
+- [낮음] D11: Distribute와 Build의 자기 시임(own seam) 판정이 경계에서 엇갈림: 진폭 14 S자 큐브에서 Distribute가 3개를 놓았는데(검사 own_margin +0.045)
+  저장된 위치로 Build가 1개를 "curved seam bends into" 경고와 함께 건너뜀(−0.102). 기하는 안전(관입 0), 사용자 혼란.
+- [낮음] 테스트 공백: 변환된 오브젝트의 스트로크(로컬 저장) — 월드 점을 그대로 저장하는 뮤테이션을 커밋된 테스트가 못 잡음(코드는 정확, 위 확인).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| P2 곡선 컷 라이브(MCP) | — | PASS (결함 D9–D11) | 2026-10-09 verifier, develop 29cd845: 큐브·Suzanne(눈) S자 gap 0.5, 곡면 시임 커넥터, Build 매니폴드·관입 0·원본 불변·눈 정보 메시지. `--gui` 12시나리오 ×2·헤드리스 34/34 ×2·`--slow` PASS. 열린 항목 — 위 "P2 곡선 컷 라이브 검증" 절 |
 | QA-7 곡선(스트로크) 컷 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p2-curved: `--gui` p2_stroke — 실제 LMB 드래그·Enter·Ctrl+Z/Ctrl+Shift+Z·모달 Build(눈 셸 정보)·Esc/RMB·Shift 스냅·Redraw·파일 로드. 사람 확인 남음: 리본 프리뷰 가독성, 원근 뷰에서 그린 감각(압출은 뷰 방향 하나, 원근 광선이 아님) [4.5](qa/p2_stroke_4.5.png) [5.2](qa/p2_stroke_5.2.png) |
 | QA-8 Build 진행률 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p2_build_progress — 13만 면, 빌드 중 상태바 텍스트 [5.2](qa/p2_build_progress_5.2.png), Esc 중간 취소 이전 결과 유지. 사람 확인 남음: 51만 면에서 불리언 한 단계(~30 s) 동안은 UI가 멈춤(단계 사이에만 갱신) |
 | QA-5 컷 평면 모달 조정 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p1-mvp2: `--gui` p1_adjust_plane — 오버레이 주황, 드래그·휠·X·LMB·Esc, 실제 Ctrl+Z/Ctrl+Shift+Z, 모달 중 undo/redo, 파일 로드 `cancel()`. 사람 확인 남음: 드래그 감도, 오버레이 가독성 [5.2](qa/p1_adjust_plane_5.2.png) |
