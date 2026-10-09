@@ -148,6 +148,19 @@ def d19_speed(ctx, custom_socket, shapes_mod):
             worst = min(fit.depth_inside(bvh, p - Vector((0.0, 0.0, s * gap))) for p in pin.samples(0.5))
             assert worst >= 0.9 * C, (key, worst)
         ctx.metric(f"d19_{key}_s", round(dt, 3))
+        # another clearance on the same shape: its own socket (the cache key holds the clearance)
+        big = ctx.module("connectors.apply").ConnectorSpec(
+            label="", matrix=shapes_mod.Matrix(), kind='CUSTOM', width=W, height=W, length=L, clearance=2 * C,
+            gap=0.4, pin_positive=True, custom=shape)
+        solids = shapes_mod.connector_solids(big)
+        assert len(custom_socket._CACHE) == 2, len(custom_socket._CACHE)
+        sbm = bmesh.new()
+        solids.socket[0].add_to(sbm)
+        bvh = BVHTree.FromBMesh(sbm)
+        sbm.free()
+        fit = ctx.module("connectors.fit")
+        worst = min(fit.depth_inside(bvh, p - Vector((0.0, 0.0, 0.4))) for p in solids.pin[0].samples(0.5))
+        assert worst >= 0.9 * 2 * C, (key, "socket of the larger clearance", worst)
 
 
 def run(ctx):

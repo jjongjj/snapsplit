@@ -13,6 +13,7 @@ from mathutils import Vector
 
 from ..core import meshlib, naming
 from ..cuts import plane, polygon, stroke
+from .props import SCHEMA_VERSION
 
 CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "depth_mm", "cap",
               "distribution", "connector_count", "connector_rows", "margin_pct")
@@ -64,6 +65,8 @@ def world_bbox_center(obj):
 
 
 def _new_uid(stack):
+    # Written explicitly (a default value is not saved in the file): files record which schema made them
+    stack.schema_version = SCHEMA_VERSION
     uid = f"C{stack.next_uid}"
     stack.next_uid += 1
     return uid

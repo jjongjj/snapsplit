@@ -77,11 +77,15 @@ def transform_cut(cut, m):
 def apply_rotation_scale(obj):
     """Apply rotation and scale of ``obj`` (location kept) to its mesh and cut stack. Returns the matrix
     applied to the object-space data."""
-    loc, rot, sca = obj.matrix_basis.decompose()
+    loc, rot, sca = obj.matrix_basis.decompose()     # includes the delta rotation / scale
     m = (rot.to_matrix() @ Matrix.Diagonal(sca)).to_4x4()
     obj.data.transform(m, shape_keys=True)
     if m.determinant() < 0.0:
         obj.data.flip_normals()
+    # The deltas are applied too (otherwise setting the matrix leaves scale 1/delta behind)
+    obj.delta_scale = (1.0, 1.0, 1.0)
+    obj.delta_rotation_euler = (0.0, 0.0, 0.0)
+    obj.delta_rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
     obj.matrix_basis = Matrix.Translation(loc)
     for child in obj.children:
         child.matrix_parent_inverse = m @ child.matrix_parent_inverse
@@ -249,8 +253,16 @@ class SPLITFORGE_OT_fix_holes(_FixOp, Operator):
             if open_edges:
                 bmesh.ops.holes_fill(bm, edges=open_edges, sides=0)
             new_faces = len(bm.faces) - faces_before
+            flipped = 0
             if new_faces:
+                # The fill faces get consistent outward normals; existing faces may flip too (reported)
+                bm.normal_update()
+                bm.faces.ensure_lookup_table()
+                before = [f.normal.copy() for f in bm.faces[:faces_before]]
                 bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+                bm.normal_update()
+                bm.faces.ensure_lookup_table()
+                flipped = sum(1 for f, n in zip(bm.faces[:faces_before], before) if f.normal.dot(n) < 0.0)
             remaining_open = sum(1 for e in bm.edges if len(e.link_faces) == 1)
             multi = sum(1 for e in bm.edges if len(e.link_faces) > 2)
             changed = bool(n_loose_e or n_loose_v or new_faces)
@@ -269,7 +281,9 @@ class SPLITFORGE_OT_fix_holes(_FixOp, Operator):
         self._recheck(context, obj)
         self.report({'WARNING'} if left else {'INFO'},
                     f"{obj.name}: filled holes with {new_faces} face(s), deleted {n_loose_v} loose vertex(es) and "
-                    f"{n_loose_e} loose edge(s){left}{self._rebuild_hint(obj)}")
+                    f"{n_loose_e} loose edge(s)"
+                    + (f", flipped {flipped} face(s) to point outward" if flipped else "")
+                    + f"{left}{self._rebuild_hint(obj)}")
         return {'FINISHED'}
 
 
