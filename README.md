@@ -5,7 +5,7 @@ parts and joins them with pins, tenons, dovetails, snap connectors, custom conne
 dowels. It is a GPL-3.0-or-later fork of [SnapSplit](https://github.com/Betakontext/snapsplit) by
 Christoph Medicus (Betakontext), rebuilt around a non-destructive workflow.
 
-- Version **0.4.0**, for **Blender 5.2** (the only version it is tested on; see "Blender version").
+- Version **0.4.1**, for **Blender 5.2** (the only version it is tested on; see "Blender version").
 - N-panel (sidebar) tab: **SplitForge**. German and Korean UI, Korean tooltips.
 - Changes: [CHANGELOG.md](CHANGELOG.md). Development plan and verification records: `docs/`.
 
@@ -13,7 +13,7 @@ Christoph Medicus (Betakontext), rebuilt around a non-destructive workflow.
 
 ## Installation
 
-1. Download `splitforge-0.4.0.zip` (or build it, see "Building the release zip").
+1. Download `splitforge-0.4.1.zip` (or build it, see "Building the release zip").
 2. Blender 5.2: *Edit > Preferences > Get Extensions*, the drop-down at the top right,
    **Install from Disk...**, pick the zip. (Or drag the zip into the Blender window.)
 3. Open a 3D Viewport, press **N**, choose the **SplitForge** tab.
@@ -156,6 +156,12 @@ an error naming the path.
   cutter); they cannot follow a curved surface in depth. Perspective views use the view direction,
   not the diverging rays.
 - Polygon cuts take connectors only on the floor of a cut-out with a Depth, not on their walls.
+- With a gap, polyline and polygon corners must be at least 15 degrees (sharper ones are refused with
+  the reason; without a gap any corner works). A polygon cut-out must be at least 0.5 mm across.
+- Connectors on a polyline keep away from its corners; on a stroke from tight bends.
+- The custom socket cache lives for the session only (recomputed after reopening the file; a second or
+  two for non-convex meshes, instant for convex ones).
+- Apply Rotation & Scale also applies delta rotation/scale; the delta location is kept as location.
 - One boolean step on a very large mesh (500k faces) blocks the UI for its duration; the status
   bar updates between steps. Accurate is much slower than Fast on such meshes (see `docs/CHECKLIST.md`).
 - Sliding dovetail rails (pushed in sideways along the seam) are not supported yet (backlog B-1).
@@ -165,7 +171,7 @@ an error naming the path.
 
 ## Blender version
 
-SplitForge 0.4.0 supports **Blender 5.2** only (user decision, 2026-10-10): the manifest's
+SplitForge 0.4.x supports **Blender 5.2** only (user decision, 2026-10-10): the manifest's
 `blender_version_min` is 5.2.0 and every automated test runs on 5.2.2 LTS. It used Blender 4.5
 as a second test target until Phase 3 (`python3 tests/run_tests.py --all-versions` still runs it,
 as an unsupported signal); the 4.x solver-name shims were removed.
@@ -176,7 +182,7 @@ as an unsupported signal); the 4.x solver-name shims were removed.
 BL52="/path/to/blender"     # Blender 5.2
 "$BL52" --command extension validate splitforge
 "$BL52" --command extension build --source-dir splitforge --output-dir dist
-# -> dist/splitforge-0.4.0.zip
+# -> dist/splitforge-0.4.1.zip
 ```
 
 The manifest excludes caches and tests (`paths_exclude_pattern`). Tests (Blender 5.2 headless,

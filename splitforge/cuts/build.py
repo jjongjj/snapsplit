@@ -174,7 +174,8 @@ class PolygonCut:
         if self._barrier is None:
             bm = self.cutter.solid()
             try:
-                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(bm), self.gap, self.cutter.is_inside)
+                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(bm), self.gap, self.cutter.is_inside,
+                                                  wall=True)
             finally:
                 bm.free()
         return self._barrier
@@ -237,7 +238,8 @@ def cut_spec(obj, cut, scene):
     if cut.kind == 'POLYGON':
         points, d = stroke_world(obj.matrix_world, cut)
         try:
-            cutter = polygon.build_cutter(points, d, world_corners(obj), gap, cut.depth_mm * mm)
+            cutter = polygon.build_cutter(points, d, world_corners(obj), gap, cut.depth_mm * mm,
+                                           mm)
         except stroke.StrokeError as ex:
             raise BuildError(f"{cut.name}: {ex}") from None
         return PolygonCut(cut.name, cut.uid, cutter, gap)

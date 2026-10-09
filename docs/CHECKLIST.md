@@ -398,3 +398,32 @@ p3_connector_click 21.7 s, p3_connector_types 10.0 s, **p4_points 36.1 s**(40 �
   원안의 `cuts/polyline.py` 커터는 스트로크 커터 재사용(파일은 규칙·화면 헬퍼); 원안의 `fix_transforms`/`fix_units` 외에 법선·병합·구멍 Fix 추가.
 - 독립 검증(2026-10-10, verifier, develop bdd59e3, 5.2 전용): 헤드리스 **43/43 ×2 PASS**, `--gui` **8시나리오 전체 PASS**(p4_points 36.1 s, p4_fix 124.4 s), `--slow test_perf_large` PASS(평면 Auto 13.93 / Accurate 50.62 s, 폴리라인+폴리곤 Auto 11.29 / Accurate 46.75 s), `extension validate` 성공·develop에서 다시 build한 zip 44파일(p4 zip·git HEAD와 내용 동일, tests·pycache 없음), `--zip` 설치 검사 + 43/43 PASS. D19 볼록 소켓 수치 검사 최소 여유 0.2500(UV 구 0.2496), 원뿔 0.006 s·별 2.0 s. 뮤테이션 5건 중 4건 검출(볼록 경로 끔, 폴리곤 항상 관통, Fill Holes 떨어진 정점 남김, Ctrl 스냅 끔); 미검출 1건: 소켓 캐시 키에서 공차 제거(테스트가 같은 형상의 공차를 바꾸지 않음, 코드는 정확). 적대 폴리곤·폴리라인·Fix·옛 .blend 모두 정상 또는 이유와 함께 거부. 라이브 5.2: 릴리스 zip을 User Default에 설치해 Check Mesh + Fix 5종, 폴리라인 + 깊이 폴리곤 + 커넥터 Build, STL, 한국어 UI (MANUAL_QA "Phase 4 라이브 검증 — 릴리스 zip"). 새 결함 D20(뾰족한 폴리라인 + 갭 Build 실패, 중간~낮음), D21(아주 작은 폴리곤, 낮음).
 - 남은 것(사람 확인): 실제 장치에서 점 찍기 감각, 프리뷰 가독성, Fix 대화상자 문구, 실제 출력 끼움(커스텀 소켓 0.25 mm), 한국어 툴팁 문구.
+
+### Phase 4 검증 후속 (fix/p4-followups, 검증자 결함 D20·D21 + 낮음/정보, 0.4.1)
+
+- [x] **D20 날카로운 꼭짓점 + 갭**: 원인 — 오프셋 마이터를 4×오프셋으로 자르면(cos_half ≥ 0.25) 점이 적은 폴리라인에서 꼭짓점 양옆
+  **구간 전체**가 기울어져(꼭짓점 쪽에서 0.69h까지) 갭이 구간을 따라 좁아짐 → 쌍 검사(A + B + 갭 × 시임 면적/2 = 조각)가 모든 솔버에서
+  실패("no solver left"). 꼭짓점 < 약 29°에서 발생(갭 1 mm는 25°도). 수정: 정확한 마이터(오프셋 구간이 정확히 평행 → 갭 슬래브 =
+  갭 × 평균 길이, 쌍 검사 정확), 갭이 있으면 15° 미만 꼭짓점은 추가·패널 검사에서 각도와 함께 거부(마이터 > ~7.7h). 폴리곤도 같은 규칙.
+  검증: `test_sharp_corners.py` — V 꼭짓점 10/15/20/25/40° × 갭 0/0.3/1: 갭 0 모두 빌드, ≥ 15° 모두 첫 시도 EXACT×2·경고 0·파트 사이 최소
+  간격 = 갭(0.3000/1.0000), 10°+갭은 추가 거부("10.0 degrees … at least 15")·저장된 컷의 패널 문제; 폴리곤 20° 뾰족 + 갭 1 빌드(간격 1.0),
+  10° 거부. 프로브(이전 코드): 15°/20° × 0.3/1, 25° × 1 실패 재현.
+- [x] **D21 아주 작은 폴리곤**: 0.5 mm 미만(2 × 면적 / 둘레 < 0.25 mm, 또는 bbox 안 부피 < 1e-5 × bbox 부피)이면 추가·패널·Build에서
+  "too small or too narrow to cut out: … at least 0.5 mm across". 프로브: 0.01·0.1 mm 정사각형은 이전에 Build 실패(부피 허용치 아래), 0.5 mm는 빌드.
+  검증: `test_polygon_cut.py`(0.01/0.1/0.4 정사각형·0.2 mm 띠 거부, 0.5 mm 빌드 EXACT×2, 저장 후 줄이면 패널 문제·Build 오류).
+- [x] **낮음** 폴리곤 바닥 커넥터가 벽에 걸리면 "pin or socket would reach into the wall of the polygon cut-out"(Build), Distribute/클릭 이유
+  "too close to the wall of the polygon cut-out"(`RibbonBarrier.wall`). 검증: `test_polygon_cut.py`.
+- [x] **낮음** 궤도 회전 뒤 점 찍기: Ctrl 15° 스냅과 첫 점 닫기가 저장된 3D 점의 **현재** 화면 위치를 매 이벤트 계산(화면 좌표 저장 삭제).
+  검증: `test_points_modal.py`(기울인 뷰에서 Ctrl 클릭 → 그 뷰 화면에서 165°, 첫 꼭짓점이 40 px 이상 옮겨진 뒤 그 위치 클릭으로 닫힘).
+- [x] **정보** Fill Holes가 바깥으로 뒤집은 기존 면 수를 보고; `schema_version`을 컷 추가 시 명시적으로 기록(기본값은 파일에 저장되지
+  않음, `test_model`: 저장·로드 후 `is_property_set`); 같은 커스텀 형상의 다른 공차 = 새 캐시 항목·공차 유지(`test_custom_socket`);
+  Apply Rotation & Scale가 delta 회전·스케일도 적용(scale 0.5/delta 2가 남던 문제, `test_validate_ops`: 월드 정점 동일·delta 초기화).
+- [x] README 알려진 제한(꼭짓점 15°·0.5 mm·세션 캐시·delta), CHANGELOG **0.4.1**(동작 수정이 있어 패치 버전).
+- 뮤테이션 14/14 검출(클램프 마이터 복원 ×2, 꼭짓점 거부 끔 ×2, 크기 검사 끔, 패널 크기 검사 끔, 벽 문구·이유 끔, 오래된 스냅 좌표,
+  닫기 위치 고정, delta 미초기화, 뒤집힘 보고 누락, schema 미기록, 캐시 키에서 공차 제거).
+
+결과(2026-10-10, fix/p4-followups, Blender 5.2.2): 헤드리스 **44/44 PASS**(새 test_sharp_corners), `--zip dist/splitforge-0.4.1.zip`
+44/44 + 설치 검사 PASS, `--gui` **8/8 PASS**(p1_adjust_plane 26.1 s, p1_panel 186.9 s, p2_stroke 47.7 s, p2_build_progress 49.4 s,
+p3_connector_click 21.7 s, p3_connector_types 10.0 s, p4_points 36.1 s, p4_fix 126.2 s), `--slow test_perf_large`(514 560면) PASS:
+평면 Auto 13.81 / Accurate 50.32 s, 타입 13.94 / 47.44 s, S자 9.10 / 43.83 s, 폴리라인+폴리곤 11.30 / 46.92 s(< 120 s).
+`extension validate` 성공, `extension build` → `dist/splitforge-0.4.1.zip`(44파일, 155 950 B, tests·pycache 없음).

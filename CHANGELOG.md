@@ -3,6 +3,22 @@
 SplitForge is a fork of SnapSplit by Christoph Medicus (Betakontext). Versions before 0.3 are
 SnapSplit's (see its repository); SplitForge continues the numbering.
 
+## 0.4.1 (2026-10-10) - fixes after the Phase 4 verification
+
+Fixed
+- Sharp polyline corners with a gap (D20): offsets now use exact mitre joins (the old clamped mitre
+  narrowed the kerf along both segments next to a corner under ~30 degrees and Build failed with "no
+  solver left"); corners under 15 degrees are refused with a gap, at add time and in the panel check.
+  Polygons the same.
+- Tiny polygon cut-outs (D21): under 0.5 mm across they are refused at add time and in the panel check
+  instead of failing at Build.
+- A floor connector of a polygon cut-out too close to its wall is skipped / dropped with a message about
+  the cut-out's wall (it said "the curved seam bends into it").
+- Placing points after orbiting the view: Ctrl's 15 degree steps and closing a polygon on its first
+  corner use where the points are on screen now.
+- Apply Rotation & Scale applies delta rotation and scale too (left scale 0.5 / delta 2 before).
+- Fill Holes reports faces it turned outward; the stack's schema version is written to the file.
+
 ## 0.4.0 (2026-10-10) - first feature-complete release, Blender 5.2
 
 Added

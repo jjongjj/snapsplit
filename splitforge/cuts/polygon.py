@@ -40,6 +40,12 @@ from mathutils import Vector
 from . import stroke
 
 MARGIN_FRACTION = stroke.MARGIN_FRACTION
+# Smallest cut-out (defect D21): about MIN_SIZE_MM across -- 2 x area / perimeter at least half of it
+# (a square of side MIN_SIZE_MM, a strip MIN_SIZE_MM / 2 wide) -- and its volume inside the object's
+# bounding box at least MIN_VOLUME_SHARE of that box: smaller pieces are below what the boolean result
+# checks can tell from float noise (and below anything printable).
+MIN_SIZE_MM = 0.5
+MIN_VOLUME_SHARE = 1e-5
 
 
 def signed_area(poly):
@@ -73,9 +79,8 @@ def edges_cross(poly):
     return False
 
 
-def offset_closed(poly, h):
-    """Closed polygon offset by ``h`` along the left normal of its edges (inward for a
-    counter-clockwise polygon), mitered with the same limit as stroke.offset."""
+def mitre_scales_closed(poly):
+    """1 / cos(half the turn) at each vertex of a closed polygon (exact mitre, stroke.MITER_LIMIT)."""
     n = len(poly)
     segs = [stroke._unit((poly[(i + 1) % n][0] - poly[i][0], poly[(i + 1) % n][1] - poly[i][1]))
             for i in range(n)]
@@ -83,11 +88,26 @@ def offset_closed(poly, h):
     for i in range(n):
         s0, s1 = segs[i - 1], segs[i]
         t = stroke._unit((s0[0] + s1[0], s0[1] + s1[1]))
+        cos_half = abs(s0[0] * t[0] + s0[1] * t[1]) if t != (0.0, 0.0) else 0.0
+        out.append(1.0 / cos_half if cos_half > 1e-12 else math.inf)
+    return out
+
+
+def offset_closed(poly, h):
+    """Closed polygon offset by ``h`` along the left normal of its edges (inward for a
+    counter-clockwise polygon), exact mitre joins like stroke.offset (defect D20)."""
+    n = len(poly)
+    segs = [stroke._unit((poly[(i + 1) % n][0] - poly[i][0], poly[(i + 1) % n][1] - poly[i][1]))
+            for i in range(n)]
+    out = []
+    for i, scale in enumerate(mitre_scales_closed(poly)):
+        s0, s1 = segs[i - 1], segs[i]
+        t = stroke._unit((s0[0] + s1[0], s0[1] + s1[1]))
         if t == (0.0, 0.0):
             t = s1
-        cos_half = max(abs(s0[0] * t[0] + s0[1] * t[1]), 0.25)
+        scale = min(scale, 1e6)
         nx, ny = -t[1], t[0]
-        out.append((poly[i][0] + nx * h / cos_half, poly[i][1] + ny * h / cos_half))
+        out.append((poly[i][0] + nx * h * scale, poly[i][1] + ny * h * scale))
     return out
 
 
@@ -186,12 +206,13 @@ def clean_points(pts, eps):
     return out
 
 
-def build_cutter(points, direction, corners, gap=0.0, depth=0.0):
+def build_cutter(points, direction, corners, gap=0.0, depth=0.0, mm=0.0):
     """PolygonCutter for a closed polygon (world points, extrusion ``direction``) around an object.
 
     ``corners``: world points bounding the object, ``gap``: kerf width,
     ``depth``: how far the cut-out reaches from the front of the object along
-    ``direction`` (0 = through everything); all in the same unit. Raises
+    ``direction`` (0 = through everything); all in the same unit. ``mm``: one
+    millimeter in that unit, for the minimum size checks (0 skips them). Raises
     stroke.StrokeError with a user message for an unusable polygon.
     """
     d = Vector(direction)
@@ -215,6 +236,13 @@ def build_cutter(points, direction, corners, gap=0.0, depth=0.0):
         poly.reverse()
     half = max(gap, 0.0) * 0.5
     if half > 0.0:
+        sharpest = max(mitre_scales_closed(poly))
+        if sharpest > stroke.MITER_LIMIT:
+            angle = 2.0 * math.degrees(math.asin(min(1.0, 1.0 / sharpest)))
+            raise stroke.StrokeError(
+                f"A corner of the polygon is too sharp for a gap ({angle:.1f} degrees; with a gap corners need "
+                f"at least {stroke.MIN_CORNER_DEG:g}): widen the corner or "
+                "set the gap to 0")
         inner, outer = offset_closed(poly, half), offset_closed(poly, -half)
         if (_folded(poly, inner) or _folded(poly, outer) or edges_cross(inner) or edges_cross(outer)
                 or signed_area(inner) <= 0.0):
@@ -228,6 +256,16 @@ def build_cutter(points, direction, corners, gap=0.0, depth=0.0):
     z0 = front - margin
     through = depth <= 0.0 or front + depth >= back
     z_floor = back + margin if through else front + depth
+    if mm > 0.0:
+        min_width = 0.5 * MIN_SIZE_MM * mm
+        n = len(poly)
+        perimeter = sum(math.dist(poly[i], poly[(i + 1) % n]) for i in range(n))
+        width = 2.0 * abs(area) / perimeter
+        box = [max(c[i] for c in corners) - min(c[i] for c in corners) for i in range(3)]
+        thickness = (back - front) if through else min(depth, back - front)
+        if width < min_width * (1.0 - 1e-6) or abs(area) * thickness < MIN_VOLUME_SHARE * box[0] * box[1] * box[2]:
+            raise stroke.StrokeError(f"The polygon is too small or too narrow to cut out: draw a region at least "
+                                     f"{MIN_SIZE_MM:g} mm across")
     return PolygonCutter(frame, poly, inner, outer, z0, z_floor, max(gap, 0.0), through)
 
 

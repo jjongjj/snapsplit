@@ -102,9 +102,10 @@ class RibbonBarrier:
     cutter prism had misclassified points next to its sliver faces (D11).
     """
 
-    def __init__(self, ribbon_bvh, gap, side_fn, interior_fn=None):
+    def __init__(self, ribbon_bvh, gap, side_fn, interior_fn=None, wall=False):
         self.ribbon_bvh, self.gap, self.side_fn = ribbon_bvh, gap, side_fn
         self.interior_fn = interior_fn
+        self.wall = wall    # True: the walls (and floor) of a polygon cut-out, not a curved seam
         self.exact_calls = 0
 
     def positive(self, p):

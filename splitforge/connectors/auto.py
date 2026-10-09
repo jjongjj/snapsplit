@@ -54,6 +54,7 @@ REASONS = {
     "surface": "would break through the surface",
     "other cut": "would reach across another cut",
     "own seam": "the curved seam bends into it",
+    "own wall": "too close to the wall of the polygon cut-out",
     "spacing": "too close to another connector",
 }
 
@@ -192,6 +193,11 @@ def seam_regions_mm(context, obj, cut):
     return _plane_regions(context, obj, spec, others), source_bvh
 
 
+def own_reason(reason, own):
+    """The fit reason key, "own wall" instead of "own seam" for a polygon cut-out's walls."""
+    return "own wall" if reason == "own seam" and own is not None and own.wall else reason
+
+
 def through_polygon_message(spec):
     """Why connectors cannot go on a polygon cut through the whole object ("" otherwise)."""
     if spec.kind == 'POLYGON' and spec.cutter.through:
@@ -253,7 +259,8 @@ def add_auto(context, obj, cut, kind=None, width_mm=5.0, height_mm=5.0, length_m
         cspec = build.make_spec(obj, cut, scene, "", u, v, 0.0, values["kind"], values["width_mm"],
                                 values["height_mm"], values["length_mm"], clearance, 'A', spec,
                                 custom=custom, **extra)
-        return fit.check(cspec, bvh, others, wall, both_sides=True, max_step=step, own=own).reason(wall)
+        return own_reason(fit.check(cspec, bvh, others, wall, both_sides=True, max_step=step, own=own).reason(wall),
+                          own)
 
     result, points = AutoResult(), []
     for loops in regions:

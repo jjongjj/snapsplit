@@ -92,6 +92,13 @@ def run(ctx):
     cube.name = "ModelCube"
     _fill(cube)
     bpy.context.scene.splitforge.boolean_quality = 'FAST'
+    # schema_version is written into the file by adding a cut (a default would not be saved)
+    lib.select_only([cube])
+    lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='X')
+    cube.splitforge_stack.cuts.remove(len(cube.splitforge_stack.cuts) - 1)
+    cube.splitforge_stack.active_index = 1
+    assert cube.splitforge_stack.is_property_set("schema_version")
+
     before = _snapshot(cube)
     assert len(before[3]) == 5 and sum(len(c[10]) for c in before[3]) == 8, before
     assert before[3][2][3] == 'STROKE' and len(before[3][2][12]) == 5 and before[2] == 4 and before[4] == 'FAST', before
@@ -106,6 +113,8 @@ def run(ctx):
     bpy.ops.wm.open_mainfile(filepath=path)
     after = _snapshot(bpy.data.objects["ModelCube"])
     assert after == before, (before, after)
+    loaded = bpy.data.objects["ModelCube"].splitforge_stack
+    assert loaded.is_property_set("schema_version") and loaded.schema_version == 4, "schema version saved in the file"
 
     # Disable/enable three times: the stored values come back each time
     for _ in range(3):

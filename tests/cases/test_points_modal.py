@@ -115,7 +115,23 @@ def run(ctx):
     p = op._world[-1]
     assert abs(p[0] - 30.0) < 0.06 and abs(p[1]) < 1e-5 and abs(p[2] + 1.0) < 0.06, ("not on the first plane", p)
     assert tuple(round(c, 6) for c in op._dir) == (0.0, 1.0, 0.0), op._dir
+    # Ctrl after orbiting: 15 degree steps measured from the previous point where it is on screen NOW
+    p1 = tilted.to_region(op._world[-1])
+    target = (p1[0] - 150.0, p1[1] + 46.0)       # 162.9 degrees on screen -> 165
+    assert pl.modal(op, tctx, event('LEFTMOUSE', 'PRESS', target, ctrl=True)) == {'RUNNING_MODAL'}
+    q0, q1 = tilted.to_region(op._world[-2]), tilted.to_region(op._world[-1])
+    assert len(op._world) == 3 and abs(math.degrees(math.atan2(q1[1] - q0[1], q1[0] - q0[0])) - 165.0) < 0.5, (q0, q1)
     assert pl.modal(op, tctx, event('ESC')) == {'CANCELLED'}
+    # A polygon started in one view closes with a click on its first corner after orbiting
+    op, reports = new_op(pg, 'POLYGON', depth=6.0)
+    for x, z in ((-25.0, -15.0), (25.0, -15.0), (25.0, 15.0), (-5.0, 15.0)):
+        click(pg, op, screen(x, z))
+    first_now = tilted.to_region(op._world[0])
+    assert (first_now - view.to_region(op._world[0])).length > 40.0, "test needs the corner to move on screen"
+    assert pg.modal(op, tctx, event('LEFTMOUSE', 'PRESS', (first_now[0] + 3, first_now[1] - 2))) == {'FINISHED'}, \
+        "a click on the first corner where it is now closes the polygon"
+    assert bpy.data.objects["PtCube"].splitforge_stack.cuts[-1].kind == 'POLYGON'
+    bpy.data.objects["PtCube"].splitforge_stack.cuts.remove(len(bpy.data.objects["PtCube"].splitforge_stack.cuts) - 1)
 
     # --- Ctrl: 15 degree steps on screen --------------------------------------------------------
     a = screen(-25.0, 0.0)

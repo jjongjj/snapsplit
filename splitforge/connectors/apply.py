@@ -138,8 +138,12 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
                                     "without a socket, skipped (move it, or Distribute again)")
                 continue
             if res.own_margin < 0.0:
-                out.warnings.append(f"{spec.label}: the curved seam bends into the pin or socket, skipped "
-                                    "(move it to a flatter part of the seam, or use a shorter connector)")
+                if own.wall:
+                    out.warnings.append(f"{spec.label}: pin or socket would reach into the wall of the polygon "
+                                        "cut-out, skipped (move it away from the wall, or use a smaller connector)")
+                else:
+                    out.warnings.append(f"{spec.label}: the curved seam bends into the pin or socket, skipped "
+                                        "(move it to a flatter part of the seam, or use a shorter connector)")
                 continue
             if not res.ok(tol):
                 out.warnings.append(f"{spec.label}: pin or socket would break through the outer surface, "

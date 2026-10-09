@@ -499,6 +499,7 @@ headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p4v/`, 커밋 안 �
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| P4 후속(D20·D21, 0.4.1) | — (5.2 전용) | PASS (자동) | 2026-10-10 fix/p4-followups: 날카로운 꼭짓점(15° 미만 + 갭 거부, 정확한 마이터로 갭 균일), 0.5 mm 미만 폴리곤 거부, 벽 문구, 궤도 회전 뒤 스냅·닫기(headless `test_sharp_corners`·`test_polygon_cut`·`test_points_modal`), `--gui` 8/8 재실행 PASS |
 | QA-11 폴리라인·폴리곤 컷 | — (5.2 전용) | PASS (자동) | 2026-10-10 feat/p4-final: `--gui` p4_points — 실제 클릭 4번·모달 중 Ctrl+Z 점 삭제·Enter·실제 Ctrl+Z/Ctrl+Shift+Z·Esc/RMB·첫 점 클릭으로 폴리곤 닫기·바닥 커넥터 클릭·모달 Build 3파트·파일 로드 `cancel()` [폴리라인](qa/p4_polyline_oblique_5.2.png) [폴리곤](qa/p4_polygon_preview_5.2.png) [빌드](qa/p4_built_apart_5.2.png). 사람 확인 남음: 점 찍기 감각, 프리뷰 가독성 |
 | QA-12 출력 검사·Fix | — (5.2 전용) | PASS (자동) | 2026-10-10: `--gui` p4_fix — 사이드바 실제 클릭: Check Mesh, 법선 Fix, 변환 Fix(컷 월드 위치 유지)·실제 Ctrl+Z/Ctrl+Shift+Z, 단위 Fix 대화상자 Enter [발견](qa/p4_fix_checks_found_5.2.png) [수정 후](qa/p4_fix_checks_fixed_5.2.png). 사람 확인 남음: 문구·대화상자 설명 |
 | D19·Export 폴더(Phase 3 후속 열린 항목) | — | PASS (headless) | 2026-10-10: D19 원뿔 소켓 17.4 s → 0.01 s, Distribute+Build 42 s → 0.08 s, 별·원뿔 소켓 DIFFERENCE 평범한 EXACT(폴백 없음); Export 폴더/파일 오류가 경로를 밝힌 ERROR(`test_custom_socket`, `test_export`) |

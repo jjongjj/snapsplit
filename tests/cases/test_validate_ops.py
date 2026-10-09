@@ -103,6 +103,21 @@ def run(ctx):
     plain = lib.make_cube(10.0)
     lib.select_only([plain])
     assert bpy.ops.splitforge.fix_transforms() == {'CANCELLED'}
+    # delta scale / rotation are applied too (no scale 0.5 / delta 2 left behind)
+    delta = lib.make_cube(10.0)
+    delta.delta_scale = (2.0, 2.0, 2.0)
+    delta.delta_rotation_euler = (0.0, 0.0, math.radians(10.0))
+    delta.location = (60.0, 0.0, 0.0)
+    bpy.context.view_layer.update()
+    world_before = [tuple(round(c, 4) for c in delta.matrix_world @ v.co) for v in delta.data.vertices]
+    lib.select_only([delta])
+    run_fix(bpy.ops.splitforge.fix_transforms)
+    bpy.context.view_layer.update()
+    assert tuple(delta.scale) == (1.0, 1.0, 1.0) and tuple(delta.delta_scale) == (1.0, 1.0, 1.0), \
+        (tuple(delta.scale), tuple(delta.delta_scale))
+    assert tuple(delta.delta_rotation_euler) == (0.0, 0.0, 0.0) and validate.transform_is_applied(delta)
+    world_after = [tuple(round(c, 4) for c in delta.matrix_world @ v.co) for v in delta.data.vertices]
+    assert world_after == world_before, "world shape unchanged"
     # negative scale: normals stay outward
     neg = lib.make_cube(10.0)
     neg.scale = (-1.0, 1.0, 1.0)
@@ -205,6 +220,21 @@ def run(ctx):
     rep = validate.validate(holed)
     assert rep.manifold and not rep.loose_geom and rep.normals_ok and lib.is_manifold(holed), rep
     lib.assert_close(lib.volume(holed), 8000.0, rel=1e-6)
+    # a flipped face next to the hole: fixed with the fill and named in the report
+    flipped_holed = lib.make_cube(20.0)
+    bm = bmesh.new()
+    bm.from_mesh(flipped_holed.data)
+    bm.faces.ensure_lookup_table()
+    bmesh.ops.reverse_faces(bm, faces=[bm.faces[1]])
+    bmesh.ops.delete(bm, geom=[bm.faces[0]], context='FACES_ONLY')
+    bm.to_mesh(flipped_holed.data)
+    bm.free()
+    lib.select_only([flipped_holed])
+    fix_cls = ctx.module("ops.ops_fix").SPLITFORGE_OT_fix_holes
+    op, reports = lib.stand_in(fix_cls)
+    assert fix_cls.execute(op, bpy.context) == {'FINISHED'}
+    assert any("flipped 1 face(s)" in m for _l, m in reports), reports
+    assert validate.validate(flipped_holed).ok or validate.validate(flipped_holed).normals_ok
     # three faces on one edge: not fixed automatically, mesh untouched, reported
     fin = lib.make_cube(20.0)
     bm = bmesh.new()

@@ -1,4 +1,4 @@
-# SplitForge 0.4.0
+# SplitForge 0.4.1
 
 Cut a model into printable parts and join them with connectors (Blender 5.2 extension).
 Sidebar (N) tab **SplitForge**.

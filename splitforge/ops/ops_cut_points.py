@@ -135,7 +135,8 @@ def prepare(context, obj, kind, points_world, direction, gap=0.0, depth=0.0):
     corners = build.world_corners(obj)
     source = _source_bvh(context, obj)
     if kind == 'POLYGON':
-        cutter = polygon.build_cutter(pts, d, corners, gap, depth)
+        cutter = polygon.build_cutter(pts, d, corners, gap, depth,
+                                       units.mm_to_scene(1.0, context.scene))
         surface = cutter.solid()
         what = "polygon"
     else:
@@ -240,7 +241,6 @@ class _PointsCut:
                 return {'CANCELLED'}
         self._obj_name = obj.name
         self._world = []          # clicked points (tuples) on the plane through the object center
-        self._screen = []         # their region coordinates when clicked
         self._dir = None          # view direction at the first click (tuple)
         self._cursor = None       # rubber band end (world tuple) or None
         self._message = ""
@@ -295,10 +295,19 @@ class _PointsCut:
         hit = intersect_line_plane(origin, origin + ray, center, d)
         return (tuple(hit) if hit is not None else None), d
 
-    def _cursor_co(self, event):
+    @staticmethod
+    def _screen_of(context, point):
+        """Region coordinates of a stored world point in the CURRENT view (the view may have been
+        orbited since it was clicked), or None when it is behind the view."""
+        co = view3d_utils.location_3d_to_region_2d(context.region, context.region_data, Vector(point))
+        return None if co is None else (co.x, co.y)
+
+    def _cursor_co(self, context, event):
         co = (event.mouse_region_x, event.mouse_region_y)
-        if event.ctrl and self._screen:
-            co = polyline.snap_screen(self._screen[-1], co)
+        if event.ctrl and self._world:
+            prev = self._screen_of(context, self._world[-1])
+            if prev is not None:
+                co = polyline.snap_screen(prev, co)
         return co
 
     def _validate(self, context):
@@ -399,13 +408,14 @@ class _PointsCut:
             return {'CANCELLED'}
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             if self._world:
-                self._cursor = self._project(context, self._cursor_co(event))[0]
+                self._cursor = self._project(context, self._cursor_co(context, event))[0]
                 self._update_preview(context, None)
             return {'PASS_THROUGH'}
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and inside and not (event.alt or event.shift):
-            co = self._cursor_co(event)
+            co = self._cursor_co(context, event)
             if (self.KIND == 'POLYGON' and len(self._world) >= 3
-                    and polyline.near(co, self._screen[0])):
+                    and self._screen_of(context, self._world[0]) is not None
+                    and polyline.near(co, self._screen_of(context, self._world[0]))):
                 result = self._confirm(context)
                 if result is not None:
                     return result
@@ -419,7 +429,6 @@ class _PointsCut:
             if self._dir is None:
                 self._dir = tuple(d)
             self._world.append(hit)
-            self._screen.append(tuple(co))
             self._cursor = None
             self._changed(context)
             return {'RUNNING_MODAL'}
@@ -427,7 +436,6 @@ class _PointsCut:
                 event.type == 'Z' and (event.ctrl or event.oskey) and not event.shift)):
             if self._world:
                 self._world.pop()
-                self._screen.pop()
                 if not self._world:
                     self._dir = None
             self._cursor = None
