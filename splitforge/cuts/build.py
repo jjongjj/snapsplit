@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 import bmesh
 import bpy
+from mathutils.bvhtree import BVHTree
 
 from ..connectors import apply as conn_apply
 from ..connectors import placement
@@ -81,22 +82,31 @@ def cut_planes(obj, cuts, scene):
     return planes
 
 
+def make_spec(obj, cut, scene, label, u_mm, v_mm, rotation_deg, kind, width_mm, height_mm, length_mm,
+              clearance_mm, pin_side):
+    """ConnectorSpec (world space, BU) of one connector on ``cut``; lengths given in mm."""
+    mm = units.mm_to_scene(1.0, scene)
+    co, n, t, _b = plane.world_frame(obj.matrix_world, cut.origin, cut.normal, cut.tangent)
+    return conn_apply.ConnectorSpec(
+        label=label, matrix=placement.frame_matrix(co, n, t, u_mm * mm, v_mm * mm, rotation_deg),
+        kind=kind, width=width_mm * mm, height=height_mm * mm, length=length_mm * mm,
+        clearance=clearance_mm * mm, gap=cut.gap_mm * mm, pin_positive=(pin_side == 'A'))
+
+
+def default_clearance(settings):
+    return settings.clearance_mm if settings is not None else 0.2
+
+
 def connector_specs(obj, cuts, scene, settings):
     """ConnectorSpec list (world space, BU) for the enabled connectors of ``cuts``."""
-    mm = units.mm_to_scene(1.0, scene)
-    default_clearance = settings.clearance_mm if settings is not None else 0.2
     specs = []
     for cut in cuts:
-        co, n, t, _b = plane.world_frame(obj.matrix_world, cut.origin, cut.normal, cut.tangent)
         for i, c in enumerate(cut.connectors):
             if not c.enabled:
                 continue
-            clearance = c.clearance_mm if c.clearance_mm >= 0.0 else default_clearance
-            specs.append(conn_apply.ConnectorSpec(
-                label=f"{cut.name} connector {i + 1}",
-                matrix=placement.frame_matrix(co, n, t, c.u * mm, c.v * mm, c.rotation_deg),
-                kind=c.kind, width=c.width_mm * mm, height=c.height_mm * mm, length=c.length_mm * mm,
-                clearance=clearance * mm, gap=cut.gap_mm * mm, pin_positive=(c.pin_side == 'A')))
+            clearance = c.clearance_mm if c.clearance_mm >= 0.0 else default_clearance(settings)
+            specs.append(make_spec(obj, cut, scene, f"{cut.name} connector {i + 1}", c.u, c.v, c.rotation_deg,
+                                   c.kind, c.width_mm, c.height_mm, c.length_mm, clearance, c.pin_side))
     return specs
 
 
@@ -184,13 +194,14 @@ def build(context, obj):
     if not bm.faces:
         bm.free()
         raise BuildError("Source mesh has no faces")
+    source_bvh = BVHTree.FromBMesh(bm)  # keeps its own copy of the geometry
     pieces = cut_pieces(bm, planes, warnings)
     pins = sockets = None
     try:
         if len(pieces) < 2:
             raise BuildError("The cuts do not intersect the object")
         pins, sockets, conn_warnings, overlapping = conn_apply.assign(
-            [p.bm for p in pieces], connector_specs(obj, cuts, scene, settings))
+            [p.bm for p in pieces], connector_specs(obj, cuts, scene, settings), source_bvh)
         warnings += conn_warnings
 
         coll = _prepare_collection(context, obj)

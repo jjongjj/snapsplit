@@ -71,6 +71,16 @@ def run(ctx):
     assert all(meshlib.point_in_polys_2d(p, ring) for p in grid), grid
     assert pl.distribute_points([], 'LINE', 3) == []
 
+    # Inset: every point keeps the connector reach from all seam edges
+    tri = [[(0, 0), (30, 0), (0, 12)]]
+    for dist in ('LINE', 'GRID'):
+        pts = pl.distribute_points(tri, dist, 4, rows=3, margin_pct=0.0, inset=3.0)
+        assert pts, dist
+        for p in pts:
+            assert pl.edge_distance(p, tri) >= 3.0 - 1e-9, (dist, p)
+    assert pl.distribute_points(rect, 'LINE', 3, inset=11.0) == []  # 20 mm wide seam, 22 mm needed
+    assert _close(pl.area_centroid(rect[0]), (0, 0)) and _close(pl.area_centroid(tri[0]), (10, 4))
+
     # Exactly one distribute_points implementation in connectors/
     root = os.path.dirname(os.path.dirname(pl.__file__))
     defs = []
