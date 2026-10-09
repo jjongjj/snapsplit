@@ -207,20 +207,64 @@
 
 ## Phase 3 — 커넥터 고도화 + 레거시 제거
 
-- [ ] **P3-1 전 타입 지원**: DOVETAIL, SNAP_PIN, SNAP_TENON, SNAP_DOVETAIL, CUSTOM을 `connectors/shapes.py`로 이관, 새 apply 경로에서 생성.
-  검증: `test_connector_types.py` — 타입별 1개씩 큐브 Z컷 빌드 → 매니폴드, 타입별 핀 파트 부피 > 소켓 파트 부피. PASS.
-- [ ] **P3-2 커스텀 메시 커넥터**: `custom_object` 지정, 폭/길이/깊이 스케일.
-  검증: 같은 케이스에 사용자 원기둥 메시 → 매니폴드. 비매니폴드 커스텀 메시는 `ok=False` + 경고 메시지(`report` 캡처). PASS.
-- [ ] **P3-3 양면 도웰**: `kind=DOWEL`, `double_sided=True` → 두 파트 소켓 + 도웰 파트 오브젝트.
-  검증: `test_dowel.py` — 파트 3개(A, B, Dowel_1), 두 파트 부피 모두 반쪽보다 작음, 도웰 길이 = 2×length_mm (bbox 허용 0.05mm). PASS.
-- [ ] **P3-4 커넥터별 편집**: 위치(u,v)/회전/스케일/폭/높이/pin_side/clearance 변경 후 Rebuild 반영.
-  검증: `test_connector_edit.py` — u를 +10mm 이동 후 재빌드 → 핀 중심 bbox가 10mm 이동(허용 0.1mm); rotation 90° → 사각 테논 bbox 가로세로 교환. PASS.
-- [ ] **P3-5 클릭 배치 모달** `connector_add_click`(클릭마다 `undo_push`, S키 pin_side 토글, 프리뷰는 gpu 오버레이).
-  검증: GUI — 3회 클릭 후 Ctrl+Z 3회로 하나씩 제거됨. 프리뷰 오브젝트 생성 없음(`_SnapSplit_Preview` 컬렉션 없음).
-- [ ] **P3-6 레거시 제거**: `ops_split.py`, `ops_connectors.py`, `ops_freehand.py`, `seam_data.py` 삭제(또는 `legacy/`로 이동 후 미등록), 캡핑·지오메트리 함수는 새 모듈에 남김.
-  검증: `grep -rn "from . import ops_split\|ops_connectors\|ops_freehand" snapsplit/__init__.py | wc -l` → `0`. 전체 테스트 PASS(레거시 케이스는 새 오퍼레이터 대응 버전으로 교체). `wc -l snapsplit/**/*.py` 합계가 Phase 1 시작 시점보다 작음.
-- [ ] **P3-7 로컬라이즈**: 새 UI 문자열을 `localization.py`에 최소 en/de/ko 추가.
-  검증: `test_i18n.py` — 새 패널 라벨 키가 사전 `ko_KR`에 존재, 등록 시 "locales unknown" 경고 없음.
+- [x] **P3-0 (P2 검증 후속) D16 셸 합치기 부피 하한**: `boolean.unite_bm`은 입력을 먼저 삼각분할(비평면 n각형은 부피가 정의되지 않음)하고,
+  결과가 입력 셸들이 함께 감싸는 부피(와인딩 수 광선 적분 96×96, 겹침 1회, 솔버와 무관)와 0.2 % 안에서 같아야 한다. 거부되면 Build 경고
+  "Intersecting shells could not be united (…)" 후 겹친 채 진행. (검증자 제안의 "가장 큰 셸 ≥" 하한은 3 % 축소 Suzanne을 못 잡아 대신 이것.)
+  검증: `test_unite_check.py` — 실제 합집합 6종(Suzanne 0/1/2단계, 공동+기둥, 중첩 셸, 교차 솔리드) 입력/결과 차 0.0000 %, 3 %·1 % 축소와
+  셸 하나 누락 주입 거부, 주입한 Accurate Build는 경고 + 매니폴드 파트, 주입 없이 "united" 정보. 뮤테이션(하한 끔, 삼각분할 끔) 검출.
+- [x] **P3-1 전 타입 지원**: `connectors/shapes.py` — 커넥터 = 솔리드 목록(Loft: ROUND/RECT 단면 스윕, Ball, MeshSolid)으로 Build가 추가하고
+  `fit.py`가 **같은 솔리드**를 샘플링(표면·다른 컷 평면/리본·자기 곡선 시임·관통). 타입: CYL_PIN, RECT_TENON, DOVETAIL(끝이 좁은 테이퍼 테논),
+  SNAP_PIN/TENON/DOVETAIL(돌기 + 딤플), CUSTOM, DOWEL. 커넥터별 값: 삽입 깊이 %, 테이퍼 %, 끝 모따기, 스냅 돌기 수/지름/높이, 커스텀 메시.
+  공차: 각 면에 수직(프리즘 +c, 테이퍼 면 c/cos, 딤플 반지름 +c, 커스텀 법선 오프셋), 소켓은 조립 후(갭만큼 이동한) 핀 위치를 따름.
+  한 커넥터의 겹치는 솔리드(돌기+핀, 커스텀)는 먼저 작게 합쳐 파트 불리언은 평범한 EXACT.
+  검증: `test_connector_types.py` — 8종 × (평면 Z 컷 gap 0.4 / S자 곡선 컷 / Z 컷 + 세로 S 리본 장벽): 매니폴드, 핀 파트 > 소켓 파트(도웰은 둘 다 감소),
+  파트가 큐브 밖으로 안 나감, 단면 치수(프리즘 +2c, 도브테일 면 수직 공차 c — 허용 0.002 mm, 스냅 돌기 = 핀 + 높이, 딤플 = 돌기 + c, 커스텀 상자 W≠H 양쪽 +c),
+  곡선 시임에서 핀 파트 + / 소켓 파트 −, 리본 장벽 여유 ≥ 0.4 mm(양쪽 핀 방향), 가장자리 수동 커넥터는 Build가 "break through"로 건너뜀,
+  벽 0.2 mm 위치에서 원기둥 핀은 통과·스냅 핀(딤플)은 건너뜀, 모든 파트 불리언 EXACT. PASS 4.5/5.2.
+- [x] **P3-2 커스텀 메시 커넥터**: `custom_object`(소유 오브젝트 자신은 poll로 제외), 폭/높이/길이로 bbox 정규화(로컬 Z = 삽입 방향, 최저 Z = 박히는 끝),
+  "Use Object Size". 검증(`custom_shape`): 닫힌 매니폴드, 평평하지 않음(최소 변 > 1 % 최대 변), 면 ≤ 20 000, 부피 있음, 법선 바깥으로 재계산.
+  검증: `test_custom_connector.py` — 사용자 원기둥(크기·위치·회전 무관) = 같은 크기 CYL_PIN(부피 0.2 %), 열린/평평/고밀도/면 없는 메시 → Build 경고
+  "… skipped"(다른 커넥터는 적용), Distribute 오퍼레이터 ERROR 보고(`report` 캡처), 패널 문제 표시; 테이퍼 뿔대의 경사면 수직 공차 0.251/0.2475(c 0.25),
+  W≠H 상자 양쪽 +c; Use Object Size. 곡선 시임은 `test_connector_types`. PASS 4.5/5.2.
+- [x] **P3-3 양면 도웰**: `kind=DOWEL`(원안의 `double_sided` 대신 종류 자체가 양면) → 두 파트 소켓(깊이 L/2 + c) + 도웰 파트 `<원본>_Dowel_<n>`
+  (원안 "도웰 길이 = 2×length_mm"을 다른 커넥터와 같은 의미로 바꿈: length_mm = 도웰 전체 길이). 눕혀서(축 = X) 원본 +X 쪽 5 mm 밖, 최저 Z에.
+  검증: `test_dowel.py` — 파트 A, B, Dowel_1 매니폴드, A/B 부피 = 반쪽 − 소켓(0.2 %), 도웰 길이·지름(0.05 mm), 모따기 끝 반지름, 배치·바닥,
+  조립(도웰을 커넥터 축에 옮기고 갭을 닫음) 시 양쪽 소켓 안에 여유 0.199 mm(c 0.2), Export에 Dw_Dowel_1.stl, 두 번째 도웰 Dowel_2(옆에),
+  재빌드 누수 0, 핀으로 바꾸면 도웰 파트 사라짐, Clear Build로 제거. PASS 4.5/5.2.
+- [x] **P3-4 커넥터별 편집**: 패널의 활성 커넥터 상자(종류별 필드 + U/V·회전·핀 쪽·공차), 새 커넥터 템플릿(`Scene.splitforge.new_connector`).
+  검증: `test_connector_edit.py` — U +10 → 테논 단면 중심 10 mm 이동(0.1), 회전 90° → bbox 가로세로 교환, 폭/높이/길이/공차/삽입 깊이/핀 쪽/종류(도브테일)
+  변경이 재빌드에 반영, 편집 후 `ed.undo`/`redo`로 값과 재빌드 결과가 따라감; `test_ui_draw.py` — 8종마다 보이는/숨는 필드. PASS 4.5/5.2.
+- [x] **P3-5 클릭 배치 모달** `connector_add_click`(평면은 광선∩평면, 곡선은 광선∩리본 BVH → 펼친 (u, v); 프리뷰는 gpu 오버레이(초록/빨강);
+  3D fit 통과 시에만 추가; S = 핀 쪽; 클릭마다 `undo_push`; UNDO 플래그 없음 — PLAN 4.5).
+  검증: `test_connector_click.py`(헤드리스 스탠드인 + 합성 위 뷰: 프리뷰 이동, 클릭 위치 ±0.05 mm, S, 물체 밖/가장자리 거부와 이유, ed.undo/redo가 클릭 하나씩,
+  모달 중 undo 안전·구조체 보관 없음, 오브젝트 사라짐/`cancel()`, 곡선 리본 위 위치, 도웰, 잘못된 커스텀 메시는 시작 거부) PASS;
+  GUI `p3_connector_click` — 실제 클릭 3회 후 **실제 Ctrl+Z 3회로 하나씩 제거**, Ctrl+Shift+Z 3회 복원(모달 중, 끝난 뒤에도 클릭당 1단계),
+  프리뷰 오브젝트·컬렉션 생성 없음, Build 매니폴드, 파일 로드 → `cancel()`. 스크린샷 [프리뷰](qa/p3_click_preview_5.2.png) [배치](qa/p3_click_placed_5.2.png)
+  [빌드](qa/p3_click_built_5.2.png).
+- [x] **P3-6 레거시 제거**: `ops_split.py`, `ops_connectors.py`, `ops_freehand.py`, `ops_align.py`, `seam_data.py`, `profiles.py`, `utils.py`, `ui/legacy.py`
+  삭제(legacy/ 보관 없음, 미등록 코드도 남기지 않음). 옛 파일용 코드 없음(결정: Blender가 미등록 `Scene.snapsplit` 값을 ID 프로퍼티로 보존하고 옛 파트는 일반 메시).
+  재질 프로필 → `model/props.py`, 프리퍼런스는 debug_log만. Align Faces(면 맞춤)도 제거 — 새 워크플로는 파트를 제자리에 만들므로 필요 없음(열린 결정으로 보고).
+  검증: `grep -rn "from . import ops_split\|ops_connectors\|ops_freehand" splitforge/__init__.py | wc -l` → 0; 패키지 .py 합계 7 600줄(Phase 1 시작 15 564줄);
+  `test_legacy_parity.py`(레거시 기준 케이스 6종을 새 파이프라인으로: 큐브/Suzanne(눈 관통)/중공/3파트+오프셋/핀 3개/PETG 공차), `test_register`(레거시 타입·
+  `Scene.snapsplit`·`snapsplit.*` 미등록). 레거시 GUI 시나리오(qa1–4, 레거시 undo/load) 삭제 → p1/p2/p3 시나리오가 대체. PASS 4.5/5.2.
+- [x] **P3-7 로컬라이즈**: `localization.py`를 남은 UI 문자열만으로 정리(레거시 항목 삭제) + de_DE·ko_KR에 오퍼레이터 라벨(Operator 컨텍스트 포함)·속성/열거 이름·
+  패널 라벨·패널 고정 문구 전부(설명 툴팁은 아직 번역 안 함). 검증: `test_i18n.py` — 등록된 RNA와 패널 소스에서 모은 UI 문자열 116개 전부 ko_KR·de_DE에 있음,
+  소스에 없는 항목 0, 모든 로캘이 Blender에 알려짐(“locales unknown” 없음), 인터페이스 언어 ko_KR에서 `pgettext_iface("Build & Export")` = "빌드 및 내보내기". PASS 4.5/5.2.
+
+### Phase 3 결과 (feat/p3-connectors)
+
+결과(2026-10-09, feat/p3-connectors): 헤드리스 38/38 PASS ×2(4.5.5/5.2.2; 레거시 케이스 9개 삭제·새 케이스 9개), `--gui` 6개 시나리오 ×2 PASS
+(p1_adjust_plane, p1_panel, p2_stroke, p2_build_progress, **p3_connector_click** 18/22 s, **p3_connector_types** 7 s). 스크린샷: 클릭 프리뷰
+[4.5](qa/p3_click_preview_4.5.png) [5.2](qa/p3_click_preview_5.2.png), 배치 [5.2](qa/p3_click_placed_5.2.png), 빌드한 핀 [5.2](qa/p3_click_built_5.2.png),
+8종 [소켓](qa/p3_types_built_5.2.png) [핀](qa/p3_types_pins_5.2.png) (4.5도 같은 이름).
+- `--slow test_perf_large`(5.2, 514 560면): 평면 Build(Z 2개 + 핀) **Auto 14.66 s / Accurate 49.62 s**(커넥터 EXACT 4회 각 0.4–1.1 s, 나머지는 셸 합치기 ~31–35 s;
+  P2 후 38–46 s 대비 삼각분할 + 부피 하한 검사로 ~4–5 s 증가), Phase 3 타입 Build(도브테일·스냅 핀·커스텀·도웰) **Auto 14.29 s / Accurate 47.42 s**
+  (EXACT 3회, 폴백 0, 파트 A·B·Dowel_1), S자 Build **Auto 11.66 s / Accurate 48.46 s**. 상한 120 s 모두 통과.
+- 뮤테이션 17건 중 16건 검출(테이퍼 1/cos 제거, 소켓 갭 이동 제거, 커스텀 소켓 = 스케일, 딤플 갭 이동 제거, fit이 돌기 무시, 클릭 undo_push 제거, 커스텀 법선 미수정,
+  도웰 소켓 깊이 −c, 클릭이 fit 무시, 잘못된 커스텀 허용, 스냅 솔리드 사전 합집합 제거, ko 오퍼레이터 라벨 삭제, ko 속성 이름 삭제, 레거시식 오퍼레이터 등록,
+  D16 하한 끔, 도웰 파트 미생성). 미검출 1건: ko의 `("*", 오퍼레이터 라벨)` 항목 삭제 — 오퍼레이터 라벨은 Operator 컨텍스트로만 표시되므로 등가 뮤턴트.
+- 결정·편차: 도브테일은 밀어 넣는 테이퍼 테논만(레거시 음수 테이퍼·Span Axis/Hard-side Cut 레일 미이관), 스냅 변형은 커스텀에 없음, Align Faces 제거,
+  도웰 길이 = length_mm(체크리스트 원안 2×length_mm), `double_sided` 대신 DOWEL 종류, 클릭 모달은 UNDO 플래그 없이 클릭마다 undo_push, 툴팁 미번역.
 
 ## Phase 4 — Manual/Polygonal 컷, 검증 강화, 패키징
 

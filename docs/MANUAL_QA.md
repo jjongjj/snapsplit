@@ -14,12 +14,11 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 | `p1_panel` | QA-6: 사이드바 SplitForge 탭을 클릭으로 열고, 버튼 위치를 hover 스캔(`ui.copy_python_command_button`/`copy_data_path_button`)으로 찾아 **실제 클릭**: X 컷 추가 → Ctrl+Z/Ctrl+Shift+Z, 목록 체크박스로 활성 토글, Remove, Distribute(커넥터), Build(4파트 매니폴드, 원본 숨김·불변), Export(파트당 STL), Clear Build. 스크린샷 `panel_start`·`panel_built` → `docs/qa/p1_panel_<ver>.png` |
 | `p2_stroke` | QA-7: 구멍 메운 Suzanne(눈 셸 포함) 정면 뷰에서 `splitforge.stack_add_stroke`를 실제 LMB 드래그로 S자 → 릴리스 후 스트로크·리본 프리뷰(비스듬한 뷰로 이동해도 유지, 따뜻한 픽셀 증가), Enter → STROKE 컷(방향 = 뷰 방향 +Y), 오버레이에 리본 면, **실제 Ctrl+Z/Ctrl+Shift+Z**, 모달 Build → 매니폴드 2파트 + "2 separate shell(s)" 정보(눈 통째로), 분리 표시 스크린샷, Esc/RMB 흔적 없음·핸들러 제거, Shift 릴리스 = 수평 직선(법선 Z), Redraw(같은 uid, 새 점), 그리는 중 파일 로드 → `cancel()` |
 | `p2_build_progress` | QA-8: 13만 면 Suzanne에 스트로크 + X 평면 + Distribute, 모달 Build 중간에 **창 전체 스크린샷**(상태바 "SplitForge Build: … (n/m)"), 진행 단계(A/B 쪽, 커넥터) 마지막 = 합계, 4파트 매니폴드; 재빌드 중간 Esc → 이전 파트·메시 그대로, "Build cancelled" |
-| `qa1_preview_color` | QA-1: 프리뷰 평면이 Solid 뷰에서 주황(스크린샷 픽셀: 프리뷰 끔 대비 따뜻한 색 픽셀 비율), 재질 `diffuse_color` 주황, 토글 반복 후 고아 메쉬 0, 끄면 평면·X-Ray 정리 |
-| `qa2_adjust` | QA-2: 마우스 드래그로 오프셋 변화 + 평면이 오프셋 위치로 이동, 좌클릭 확정(오프셋 유지·모달 종료), Enter 확정(프리뷰 끔 상태, 고아 메쉬 0), Esc 취소(메시지·평면·X-Ray 정리). 비스듬한 뷰(평면이 면으로 보이게), 두 번째 확정 메시지는 그 실행 이후 출력에서만 찾음 |
-| `qa3_connectors` | QA-3: 위에서 본 분할 큐브에서 프리뷰가 커서를 따라감(커서 광선∩시임 위치와 일치, 위치 변화), 좌클릭 시 커서 위치에 핀(핀 쪽 부피 +, 소켓 쪽 −, 돌출 정점이 목표 위치 근처), S 후 클릭은 반대 파트에 핀, 두 파트 매니폴드, 우클릭 취소 후 프리뷰·X-Ray 정리. 오버레이 켜고 촬영(와이어 프리뷰는 오버레이 엔진이 그림) |
-| `qa4_freehand` | QA-4: 정면 뷰 Suzanne(머리 셸만)에 좌클릭 스트로크 → Shift 릴리스 축 스냅(평면 법선이 축과 일치) → Enter로 매니폴드 2파트, 부피 합 = 원본(±1 %), Esc는 변경 없음, 모달 중 파일 로드 시 `cancel()` 정리 |
-| `adjust_undo_wheel`, `conn_undo` | 모달 중 undo/redo(크래시 회귀), undo 직후 프리뷰 사라짐 → 다음 마우스 이동에서 재생성 |
-| `load_adjust`, `load_conn` | 모달 중 파일 로드 → `cancel()` 실행(로드 전 X-Ray 이유가 잡혀 있었고, 로드 후 해제 + 취소 메시지 출력) |
+| `p3_connector_click` | QA-9: Z 컷 큐브 위에서 본 뷰에서 `splitforge.connector_add_click` — 프리뷰(gpu 오버레이, 초록)가 커서 아래 시임 위치를 따라감, 모달 중 오브젝트·컬렉션 생성 없음, 실제 LMB 3회 = 커서 위치(±0.5 mm)에 커넥터 3개, S 후 클릭은 핀 쪽 B, 물체 밖 클릭은 무시, **실제 Ctrl+Z 3회로 하나씩 제거·Ctrl+Shift+Z 3회로 복원**(모달 중), Esc 후에도 클릭당 undo 1단계, Build 매니폴드, 파일 로드 → `cancel()`·핸들러 제거 |
+| `p3_connector_types` | QA-10: 180×30×30 막대에 Z 컷 + 8종 커넥터(원기둥 핀·사각 테논·도브테일·스냅 핀/테논/도브테일·커스텀 육각 메시·도웰) → Build: A, B, `GUI_Bar_Dowel_1`, 분리 스크린샷(위에서 소켓, 아래에서 핀) |
+(레거시 시나리오 `qa1_preview_color`·`qa2_adjust`·`qa3_connectors`·`qa4_freehand`·`adjust_undo_wheel`·`conn_undo`·`load_adjust`·`load_conn`은
+레거시 코드와 함께 Phase 3에서 삭제. 해당 기능의 새 시나리오: QA-5 `p1_adjust_plane`(조정 모달·모달 중 undo·파일 로드), QA-7 `p2_stroke`(곡선 컷),
+QA-9 `p3_connector_click`(클릭 배치).)
 
 여전히 사람이 봐야 하는 것(자동화로 대체할 수 없는 이유):
 - **시각적 품질**: 주황 평면이 "잘 보이는지", 와이어 프리뷰·스트로크 선·단면 루프 하이라이트가 읽기 쉬운지. 자동 검사는 색
@@ -37,7 +36,7 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 - 단위 규약(P1-1 `core/units.py`, 레거시 `utils.unit_mm()`도 이것을 쓴다): Blender 표시와 같다 — **1 BU = Unit Scale m**.
   애드온의 mm 값은 언제나 Blender가 mm로 보여 주는 값과 같다. Millimeters + 0.001 → 1 BU = 1 mm, Meters + 1.0 → 1000 mm,
   Millimeters + 1.0 → 1000 mm(40 BU 큐브가 "40000 mm"). 패널 상단에 실제 "1 unit = … mm"가 보이며, Export STL/OBJ는 항상 mm로 쓴다.
-- 3D 뷰포트 N 패널 > **SplitForge** 탭을 연다(새 Draft/Easy 패널; 레거시 SnapSplit UI는 맨 아래 접힌 "Legacy" 서브패널).
+- 3D 뷰포트 N 패널 > **SplitForge** 탭을 연다(Draft/Easy 패널; 레거시 SnapSplit UI는 Phase 3에서 제거).
   콘솔(Window > Toggle System Console)을 켜 두고 오류를 확인한다.
 
 ---
@@ -90,61 +89,32 @@ Esc는 진행 중인 불리언 단계가 끝난 뒤 멈추고 경고 "Build canc
   파트를 선택해도 패널은 원본의 스택("Part of Cube")을 보여 준다. Rebuild는 같은 컬렉션을 교체한다(오브젝트 누적 없음).
   Export는 파트당 파일(mm 단위)을 쓴다. Clear Build는 파트·컬렉션을 지우고 원본을 다시 보이게 한다.
 
-## QA-1 분할 프리뷰 표시 (P0-6 GUI)
+## QA-9 클릭 커넥터 배치 (`splitforge.connector_add_click`, P3-5 GUI)
 
 절차:
-1. 큐브 선택, Split Axis = Z, Number of Parts = 3.
-2. "Show split preview"를 켠다.
-3. Split Axis를 X로 바꾸고, Number of Parts를 2로 바꾼다.
-4. "Show split preview"를 끈다.
+1. 큐브에 Z 컷(갭 0.4). Connectors > New connectors에서 종류(예: Cylinder pin) 선택. 위에서 본 뷰(Numpad 7).
+2. **Click**을 누르고 마우스를 시임 위로 움직인다. 서로 다른 세 곳을 좌클릭, 한 번은 그 전에 S.
+3. 물체 밖과 가장자리(벽 0.4 mm 미만)를 클릭해 본다. Ctrl+Z 세 번, Ctrl+Shift+Z 세 번. Enter(또는 Esc/RMB).
+4. Build. 스트로크 컷에서도(정면에서 그린 S자를 위에서) 클릭해 본다.
 
 기대 결과:
-- 2단계에서 큐브를 가로지르는 반투명 주황 평면 2개가 보이고(X-Ray 자동 켜짐), 콘솔에 `AttributeError ... shadow_method`가 없다.
-- 3단계에서 평면이 X축 방향 1개로 즉시 갱신된다.
-- 4단계에서 평면이 사라지고 X-Ray가 원래 상태로 돌아온다. Outliner에 `_SnapSplit_PreviewPlane_*` 오브젝트가 남지 않는다.
+- 2단계: 커서 아래 시임 위치에 커넥터 윤곽(초록, 물체 밖은 빨강)과 핀 방향 선, 헤더에 "U … V … mm | pin side A".
+  클릭한 자리에 커넥터가 생기고(목록·노란 오버레이), S 이후는 핀 쪽 B. 프리뷰용 오브젝트·컬렉션은 생기지 않는다.
+- 3단계: 물체 밖 "Outside the object", 가장자리 "Does not fit here: would break through the surface"(추가 안 됨).
+  Ctrl+Z 한 번에 커넥터 하나씩 사라지고 Ctrl+Shift+Z로 돌아온다(모달 중에도, 끝난 뒤에도).
+- 4단계: 클릭한 자리에 핀/소켓. 곡선 시임에서는 리본 위 커서 아래 위치에 놓인다.
 
-## QA-2 모달 분할 위치 조정 (`snapsplit.adjust_split_axis`)
+## QA-10 커넥터 종류 (P3-1~P3-3 GUI)
 
-절차:
-1. 큐브 선택, Split Axis = Z, Parts = 2. "Show split preview" 옆의 "Adjust" 버튼을 누른다.
-2. 마우스를 위아래로 움직이고, 휠/↑↓ 키로 미세 조정한다.
-3. 좌클릭(또는 Enter)으로 확정한 뒤 "Planar Split"을 실행한다.
-4. Ctrl+Z로 되돌린 다음 다시 "Adjust"를 실행하고 Esc로 취소한다.
+절차: 긴 막대(180×30×30)에 Z 컷, 커넥터 목록의 활성 커넥터 상자에서 종류를 바꿔 가며 8종을 하나씩 추가(커스텀은 육각 뿔대 메시 지정),
+Build 후 A 파트를 위로 옮겨 아래에서 본다.
 
-기대 결과:
-- 2단계에서 주황 평면이 마우스/휠을 따라 Z 방향으로 움직이고, Split Offset (mm) 값이 함께 바뀐다. 평면은 오브젝트 경계 밖으로 나가지 않는다.
-- 3단계 분할 결과의 절단 높이가 마지막 평면 위치와 일치하고, 두 파트 모두 단면이 막혀 있다(캡).
-- 4단계 Esc 후 정보 메시지 "Adjust split axis cancelled."가 뜨고 프리뷰 평면·X-Ray가 정리된다.
-- 모달 중 대상 오브젝트가 사라지면(스크립트 삭제·undo) 오류 없이 "Adjust split axis cancelled."로 끝난다.
+기대 결과: 원기둥 핀, 사각 테논, 끝이 좁은 도브테일, 돌기 달린 스냅 핀/테논/도브테일, 커스텀 메시 모양 핀이 A 아래에, 같은 모양의 소켓
+(공차만큼 큼, 스냅은 딤플 포함)이 B 위에 있다. 도웰 위치에는 양쪽 모두 구멍, 막대 +X 쪽에 눕힌 `GUI_Bar_Dowel_1`.
+커스텀 메시를 열린 메시로 바꾸면 패널 경고(빨강)와 Build 경고 "not a closed manifold … skipped".
 
-## QA-3 클릭 커넥터 배치 (`snapsplit.place_connectors_click`)
-
-절차:
-1. 큐브를 Z로 2분할한 뒤 두 파트를 모두 선택한다. Connector type = CYL_PIN.
-2. "Place connectors (click)"를 누르고 마우스를 시임(절단면) 위로 움직인다.
-3. 시임 위 서로 다른 세 곳을 좌클릭한다. 한 번 S 키를 눌러 핀/소켓을 바꾼 뒤 한 번 더 클릭한다.
-4. Esc(또는 우클릭)로 종료한 뒤 Ctrl+Z를 반복한다.
-
-기대 결과:
-- 2단계에서 커서를 따라 커넥터 프리뷰가 시임 평면에 붙어 움직인다.
-- 3단계에서 클릭한 위치마다 한쪽 파트에 핀, 반대쪽에 소켓이 생기고, S 이후 클릭은 핀/소켓 쪽이 반대로 생성된다. 두 파트는 매니폴드를 유지한다(3D Print Toolbox 또는 `Select > Select All by Trait > Non Manifold`로 선택 0개).
-- 4단계 종료 후 프리뷰 오브젝트와 `_SnapSplit_Cutters` 컬렉션이 남지 않는다. Ctrl+Z 동작(한 번에 전체/클릭 단위 중 어느 쪽인지)을 메모한다(현행 동작 기록용, Phase 3에서 클릭 단위로 바꿀 예정).
-
-## QA-4 Freehand 스트로크 컷 (`snapsplit.freehand_cut`)
-
-절차:
-(레거시. 새 곡선 컷은 QA-7 — 별도 셸을 거부하지 않는다.)
-1. Suzanne(구멍 메운 것) 선택. **눈은 별도 셸이므로 지운다**(Edit Mode에서 눈 위에 커서 → L → X). Freehand Cut 단계 B3은
-   컷이 지나가지 않는 별도 셸이 있으면 "The source contains unrelated or uncut separate surface shells" 오류로 확정을 거부한다
-   (현행 제한). 정면 뷰(Numpad 1), 패널의 "Freehand Cut" 버튼을 누른다.
-2. 좌클릭 드래그로 모델을 가로지르는 사선을 그리고 놓는다. 다시 그릴 때는 Shift를 누른 채 놓아 축 스냅을 확인한다.
-3. Enter로 확정한다.
-4. Ctrl+Z 후 다시 실행하여 스트로크를 그리고 Esc로 취소한다.
-
-기대 결과:
-- 2단계에서 그리는 동안 스트로크 선이, 놓은 뒤에는 컷 평면 프리뷰(선택된 단면 루프)가 보인다. Shift 릴리스 시 평면이 가장 가까운 축 방향으로 스냅된다.
-- 3단계에서 스트로크 방향의 평면으로 2파트가 생성되고 단면이 막혀 있다. 이후 "Add connectors"로 경사 시임에 커넥터가 배치된다.
-- 4단계 Esc 후 헤더 텍스트·드로우 핸들러가 정리되고(뷰포트에 잔상 없음) 오브젝트 수가 실행 전과 같다.
+(QA-1~QA-4는 레거시 SnapSplit 기능(분할 프리뷰, Adjust Split Axis, 레거시 클릭 배치, Freehand Cut)으로 Phase 3에서 코드와 함께 삭제.
+아래 결과 기록은 이력으로 남긴다.)
 
 ---
 
@@ -381,6 +351,9 @@ headless(검증자 스크래치, 커밋 안 함):
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| QA-9 클릭 커넥터 배치 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p3-connectors: `--gui` p3_connector_click — 실제 클릭 3회·S·물체 밖 무시·실제 Ctrl+Z 3회 하나씩/Ctrl+Shift+Z 3회(모달 중과 끝난 뒤)·Build·파일 로드 `cancel()`. 사람 확인 남음: 프리뷰 가독성, 실제 마우스 감각 [프리뷰](qa/p3_click_preview_5.2.png) [배치](qa/p3_click_placed_5.2.png) [빌드](qa/p3_click_built_5.2.png) |
+| QA-10 커넥터 종류 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p3_connector_types — 8종 빌드(A, B, Dowel_1) [소켓](qa/p3_types_built_5.2.png) [핀](qa/p3_types_pins_5.2.png). 사람 확인 남음: 실제 출력 후 끼움 감각(공차·스냅 돌기 높이) |
+| D16 셸 합치기 하한 | — | — | 2026-10-09: headless `test_unite_check`(3 %·1 % 축소·셸 누락 주입 거부). 라이브 미확인(사용자 세션 미사용 규칙) |
 | D13–D15 수정 라이브(MCP) | — | PASS (새 결함 D16) | 2026-10-09 verifier, develop 3d90da6: 눈 있는 Suzanne 평면+S자+커넥터 — Accurate "6x EXACT" 폴백 0·셸 합침 정보, Fast "6x MANIFOLD"·겹침 정보. `--gui` 12×2·헤드리스 38/38 ×2·`--slow` PASS. 위 "D13–D15 수정 라이브 검증" 절 |
 | P2 후속 수정 라이브(MCP) | — | PASS (결함 D13–D15) | 2026-10-09 verifier, develop 398154a: 품질 Accurate/Fast/Auto 비교(눈 있는 Suzanne S자), 정보 줄 솔버·폴백, 갭 문제 패널 표시·해제. `--gui` 12×2·헤드리스 37/37 ×2·`--slow` PASS. 위 "P2 후속 수정 라이브 검증" 절 |
 | P2 곡선 컷 라이브(MCP) | — | PASS (결함 D9–D11) | 2026-10-09 verifier, develop 29cd845: 큐브·Suzanne(눈) S자 gap 0.5, 곡면 시임 커넥터, Build 매니폴드·관입 0·원본 불변·눈 정보 메시지. `--gui` 12시나리오 ×2·헤드리스 34/34 ×2·`--slow` PASS. 열린 항목 — 위 "P2 곡선 컷 라이브 검증" 절 |
