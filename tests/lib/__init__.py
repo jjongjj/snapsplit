@@ -142,8 +142,12 @@ def stand_in(op_cls):
     Returns ``(op, reports)``.
     """
     reports = []
-    ns = {k: v for k, v in vars(op_cls).items()
-          if callable(v) or isinstance(v, property)}
+    ns = {}
+    for klass in reversed(op_cls.__mro__):   # add-on mixins too (e.g. a shared _CutOp)
+        if klass is object or klass.__module__.startswith(("bpy", "_bpy")):
+            continue
+        ns.update({k: v for k, v in vars(klass).items()
+                   if not k.startswith("__") and (callable(v) or isinstance(v, property))})
     ns["report"] = lambda self, level, msg: reports.append((set(level), msg))
     op = type("StandIn_" + op_cls.__name__, (), ns)()
     return op, reports
