@@ -29,6 +29,10 @@ OBJECT_STACK = "splitforge_stack"      # Object.<..> -> cut stack
 # ID custom properties written on build results
 PROP_SOURCE = "splitforge_source"
 PROP_CUT_IDS = "splitforge_cut_ids"
+# ID references (survive renames): on parts the source object, on a build
+# collection the source object that owns it
+PROP_SOURCE_OBJECT = "splitforge_source_object"
+PROP_OWNER = "splitforge_owner"
 
 # Collections
 BUILD_COLLECTION_PREFIX = "SplitForge_Build_"

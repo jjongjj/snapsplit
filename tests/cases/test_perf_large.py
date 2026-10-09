@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Slow: ~510k-face Suzanne, legacy split into 3 parts + 3 CYL_PIN per seam, timed."""
+"""Slow: ~510k-face Suzanne: legacy split (3 parts + 3 CYL_PIN per seam) and SplitForge Build, timed."""
 
 import time
 
@@ -44,3 +44,24 @@ def run(ctx):
     for p in parts:
         assert p.name in bpy.data.objects, "part removed by add_connectors"
         assert lib.is_manifold(p), f"{p.name} not manifold"
+
+    # SplitForge Build on the same mesh: 2 Z cuts (3 parts) with 3 pins per seam region
+    bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
+    lib.set_scene_mm()
+    monkey = lib.make_monkey_manifold(80.0)
+    mod = monkey.modifiers.new("subsurf", 'SUBSURF')
+    mod.levels = 5
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    lib.select_only([monkey])
+    for offset in (-10.0, 10.0):
+        lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='Z', offset_mm=offset)
+        cut = monkey.splitforge_stack.cuts[-1]
+        cut.connector_count = 3
+        lib.run_op(bpy.ops.splitforge.connector_add_auto)
+    t0 = time.perf_counter()
+    lib.run_op(bpy.ops.splitforge.build)
+    ctx.metric("build_s", round(time.perf_counter() - t0, 2))
+    parts = [o for o in bpy.data.objects if o.get("splitforge_source") == monkey.name]
+    assert len(parts) == 3, [o.name for o in parts]
+    for p in parts:
+        assert lib.is_manifold(p), f"{p.name} not manifold after build"

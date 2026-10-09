@@ -24,6 +24,8 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 import bpy
 from mathutils import Vector
 
+from .core import units
+
 
 # ---------------------------
 # Collections / objects
@@ -65,33 +67,18 @@ def obj_world_bb(obj):
 # ---------------------------
 
 def unit_mm():
-    """Return the scene units per millimeter (1.0 for mm scenes, 0.001 for meter-based scenes)."""
-    us = bpy.context.scene.unit_settings
-    if (us.system == 'METRIC'
-        and getattr(us, "length_unit", "MILLIMETERS") == 'MILLIMETERS'
-        and abs(us.scale_length - 1.0) < 1e-9):
-            return 1.0
-    return 0.001
+    """Return the scene units per millimeter (exact, see core/units.py)."""
+    return units.mm_to_scene(1.0)
 
 
 def mm_to_scene(mm_value: float) -> float:
-    """Convert a length in millimeters to scene units, honoring metric settings."""
-    us = bpy.context.scene.unit_settings
-    if (us.system == 'METRIC'
-        and getattr(us, "length_unit", "MILLIMETERS") == 'MILLIMETERS'
-        and abs(us.scale_length - 1.0) < 1e-9):
-        return float(mm_value)
-    return float(mm_value) * 0.001
+    """Convert a length in millimeters to scene units (exact, see core/units.py)."""
+    return units.mm_to_scene(mm_value)
 
 
 def scene_to_mm(scene_value: float) -> float:
-    """Convert a length in scene units to millimeters, honoring metric settings."""
-    us = bpy.context.scene.unit_settings
-    if (us.system == 'METRIC'
-        and getattr(us, "length_unit", "MILLIMETERS") == 'MILLIMETERS'
-        and abs(us.scale_length - 1.0) < 1e-9):
-        return float(scene_value)
-    return float(scene_value) / 0.001
+    """Convert a length in scene units to millimeters (exact, see core/units.py)."""
+    return units.scene_to_mm(scene_value)
 
 
 # ---------------------------

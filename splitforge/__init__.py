@@ -52,6 +52,8 @@ from . import ops_split
 from . import ops_connectors
 from . import ops_align
 from . import ops_freehand
+from .model import props as model_props
+from .ops import ops_stack, ops_cut_plane, ops_connector, ops_build, ops_export
 from . import ui
 
 # Set to False for release builds to skip the development hot-reload.
@@ -66,6 +68,12 @@ _modules = [
     ops_connectors,
     ops_align,
     ops_freehand,
+    model_props,
+    ops_stack,
+    ops_cut_plane,
+    ops_connector,
+    ops_build,
+    ops_export,
     ui,
 ]
 
