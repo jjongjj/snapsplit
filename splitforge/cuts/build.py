@@ -263,6 +263,7 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
                     continue
                 if tri is None:
                     tri = piece.copy()
+                    tri.normal_update()   # n-gons are triangulated in their plane: normals must be current
                     bmesh.ops.triangulate(tri, faces=tri.faces[:])
                 operand = makers[key]()
                 try:

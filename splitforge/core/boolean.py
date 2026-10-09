@@ -226,6 +226,7 @@ def unite_bm(bm, name=TARGET_NAME):
     volume as the input's shells together (winding-number ray integral, defect D16).
     """
     bm = bm.copy()
+    bm.normal_update()   # n-gons are triangulated in their plane: normals must be current
     bmesh.ops.triangulate(bm, faces=bm.faces[:])
     mesh = bpy.data.meshes.new(name)
     bm.to_mesh(mesh)

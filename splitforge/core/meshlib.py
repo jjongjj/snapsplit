@@ -112,6 +112,7 @@ class _Triangles:
         from mathutils.bvhtree import BVHTree
         self.bm = bm.copy()
         if any(len(f.verts) != 3 for f in self.bm.faces):
+            self.bm.normal_update()   # n-gons are triangulated in their plane: normals must be current
             bmesh.ops.triangulate(self.bm, faces=self.bm.faces[:])
         self.bm.verts.index_update()
         self.bm.faces.ensure_lookup_table()

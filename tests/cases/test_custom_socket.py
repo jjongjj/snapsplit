@@ -111,6 +111,11 @@ def run(ctx):
     for key, knob in shapes().items():
         cube, res = build_with(build, f"Sk_{key}", knob)
         assert not res.warnings, (key, res.warnings)
+        # The pin (a clean user mesh) unites with plain EXACT; the socket boolean may need a fallback
+        # solver for the Minkowski socket (star), but never the voxel remesh
+        assert all(b[1] == 'EXACT' for b in res.booleans if "union" in b[0]), (key, res.booleans)
+        assert all(b[1] and b[1] != 'VOXEL' for b in res.booleans), (key, res.booleans)
+        ctx.metric(f"{key}_solvers", ",".join(b[1] for b in res.booleans))
         for part in (f"Sk_{key}_A", f"Sk_{key}_B"):
             assert lib.is_manifold(bpy.data.objects[part]), (key, part)
         got = assembled_clearance(ctx, build, cube)

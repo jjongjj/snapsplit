@@ -158,16 +158,17 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
             if not group:
                 continue
             target = table.setdefault(piece, bmesh.new())
-            if len(group) == 1 and spec.kind != 'CUSTOM':
-                group[0].add_to(target)
-                continue
-            # Snap bumps overlap their pin (dimples their socket), an offset custom mesh may fold:
-            # unite them into one clean solid first (small), so the part's boolean needs no
-            # self-intersection handling (slow on large parts); if that fails, the part gets it.
             joined = bmesh.new()
             try:
                 for solid in group:
                     solid.add_to(joined)
+                # Snap bumps overlap their pin (dimples their socket), a user mesh may cross itself:
+                # unite such a group into one clean solid first (small), so the part's boolean needs
+                # no self-intersection handling (slow on large parts); if that fails, the part gets it.
+                # (A custom socket comes united from custom_socket.py already.)
+                if len(group) == 1 and not _self_intersects(joined):
+                    _append(target, joined)
+                    continue
                 united, _why = boolean.unite_bm(joined)
                 if united is None:
                     out.overlapping.add(piece)
@@ -180,6 +181,23 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
         if solids.dowel is not None:
             out.dowels.append(DowelSpec(spec.label, *solids.dowel, matrix=spec.matrix.copy()))
     return out
+
+
+def _self_intersects(bm):
+    """True if two faces of ``bm`` that share no vertex intersect."""
+    bm.verts.index_update()
+    bm.faces.ensure_lookup_table()
+    tri = bm.copy()
+    try:
+        tri.normal_update()   # n-gons are triangulated in their plane: normals must be current
+        bmesh.ops.triangulate(tri, faces=tri.faces[:])
+        tri.verts.index_update()
+        tri.faces.ensure_lookup_table()
+        corners = [frozenset(v.index for v in f.verts) for f in tri.faces]
+        bvh = BVHTree.FromBMesh(tri)
+        return any(i != j and corners[i].isdisjoint(corners[j]) for i, j in bvh.overlap(bvh))
+    finally:
+        tri.free()
 
 
 def _append(dst, src):
