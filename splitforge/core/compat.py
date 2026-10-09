@@ -2,34 +2,10 @@
 # This file is part of SplitForge (fork of SnapSplit by Christoph Medicus).
 
 # core/compat.py
-"""Blender version differences in one place (4.2 LTS .. 5.x)."""
+"""Exporter/importer calls in one place (SplitForge supports Blender 5.2; the 4.x solver-name
+shims were removed with that decision)."""
 
 import bpy
-
-
-def boolean_solvers():
-    """Boolean modifier solver identifiers available in this Blender."""
-    prop = bpy.types.BooleanModifier.bl_rna.properties['solver']
-    return [item.identifier for item in prop.enum_items]
-
-
-def float_solver():
-    """Name of the fast floating point solver ('FAST' until 4.5, 'FLOAT' in 5.x)."""
-    solvers = boolean_solvers()
-    return 'FLOAT' if 'FLOAT' in solvers else 'FAST'
-
-
-def boolean_solver_order(preference='AUTO'):
-    """Solvers to try, in order, for ``preference`` in {'AUTO', 'EXACT', 'FAST'}.
-
-    AUTO/EXACT try EXACT first, then MANIFOLD (Blender 4.5+), then the float
-    solver. FAST starts with the float solver.
-    """
-    fast = float_solver()
-    order = [fast, 'EXACT'] if preference == 'FAST' else ['EXACT', fast]
-    if 'MANIFOLD' in boolean_solvers():
-        order.insert(1, 'MANIFOLD')
-    return order
 
 
 def _op_available(module, name):

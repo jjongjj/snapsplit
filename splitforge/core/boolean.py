@@ -17,7 +17,7 @@ FAST, see there), each verified by ``check_result``; the accurate chain is:
    operand) has intersecting shells: a filled Suzanne's eyes cut into the head
    shell, and EXACT without it returns an empty or wrong mesh (that is why the
    connector UNION on the large Suzanne "lost volume" and fell back before).
-3. MANIFOLD (Blender 4.5+), then the float solver (FAST / FLOAT in 5.x)
+3. MANIFOLD, then the float solver (FLOAT)
 4. Voxel remesh of the target, then EXACT with self-intersection (last resort;
    changes the surface, so it is reported as a warning)
 
@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 import bmesh
 import bpy
 
-from . import compat, log, meshlib
+from . import log, meshlib
 
 OPERAND_NAME = "_SplitForge_Operand"
 TARGET_NAME = "_SplitForge_Target"
@@ -44,6 +44,7 @@ EXACT = 'EXACT'
 EXACT_SELF = 'EXACT_SELF'
 MANIFOLD = 'MANIFOLD'
 VOXEL = 'VOXEL'
+FLOAT = 'FLOAT'     # the fast floating point solver (named FAST before Blender 5.0)
 
 # Voxel size of the last-resort remesh: bounding box diagonal / VOXEL_DIVISIONS (0.35 mm on a
 # 40 mm cube; finer remeshes made the exact boolean after them take minutes)
@@ -86,17 +87,16 @@ def attempt_order(quality='AUTO', self_intersect=False, voxel=True, faces=0):
 
     ``self_intersect``: the inputs are known to intersect themselves, so plain
     EXACT is skipped. Every attempt is validated (check_result) whatever the
-    order. Without MANIFOLD (Blender < 4.5) FAST equals ACCURATE.
+    order.
     """
     quality = {'EXACT': 'ACCURATE'}.get(quality, quality)
     if quality == 'AUTO':
         quality = 'FAST' if faces > LARGE_FACES else 'ACCURATE'
     exact = [EXACT_SELF] if self_intersect else [EXACT, EXACT_SELF]
-    manifold = [MANIFOLD] if MANIFOLD in compat.boolean_solvers() else []
     if quality == 'FAST':
-        order = manifold + exact + [compat.float_solver()]
+        order = [MANIFOLD] + exact + [FLOAT]
     else:
-        order = exact + manifold + [compat.float_solver()]
+        order = exact + [MANIFOLD, FLOAT]
     if voxel:
         order.append(VOXEL)
     return order

@@ -13,7 +13,8 @@ maintainer = "jjongjj <https://github.com/jjongjj/snapsplit>"
 website = "https://github.com/jjongjj/snapsplit"
 issues = "https://github.com/jjongjj/snapsplit"
 type = "add-on"
-blender_version_min = "4.2.0"
+# Supported and tested: Blender 5.2 only (user decision 2026-10-10)
+blender_version_min = "5.2.0"
 tags = ["Modeling", "Mesh", "Object", "Import-Export"]
 license = ["SPDX:GPL-3.0-or-later"]
 copyright = [

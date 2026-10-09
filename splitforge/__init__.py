@@ -26,7 +26,7 @@ bl_info = {
     "name": "SplitForge",
     "author": "SplitForge contributors; SnapSplit by Christoph Medicus",
     "version": (0, 3, 0),
-    "blender": (4, 2, 0),
+    "blender": (5, 2, 0),
     "location": "View3D > N-Panel > SplitForge",
     "description": (
         "Non-destructive cut stacks and connectors for 3D printing (fork of SnapSplit)."
