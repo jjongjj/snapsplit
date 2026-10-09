@@ -47,7 +47,8 @@ def run(ctx):
         t0 = time.perf_counter()
         result = build.build(bpy.context, monkey)
         ctx.metric(f"build_s_{quality.lower()}", round(time.perf_counter() - t0, 2))
-        ctx.metric(f"build_solvers_{quality.lower()}", ",".join(entry[1] for entry in result.booleans))
+        ctx.metric(f"build_booleans_{quality.lower()}", "; ".join(
+            f"{label}={solver}({'/'.join(f'{a}:{s}s' for a, _r, s in att)})" for label, solver, att in result.booleans))
         parts = [o for o in bpy.data.objects if o.get("splitforge_source") == monkey.name]
         assert len(parts) == 3, [o.name for o in parts]
         for p in parts:
@@ -65,12 +66,15 @@ def run(ctx):
     bpy.context.scene.collection.objects.link(knob)
     lib.select_only([monkey])
     lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='Z', offset_mm=-4.0)
+    cut = monkey.splitforge_stack.cuts[0]
+    # Positions from Distribute with a wider pin (its reach covers every type below), then the types
     t = bpy.context.scene.splitforge.new_connector
-    t.custom_object = knob
-    for kind, u, v in (('DOVETAIL', -14.0, -8.0), ('SNAP_PIN', 14.0, -8.0), ('CUSTOM', -14.0, 8.0),
-                       ('DOWEL', 14.0, 8.0)):
-        t.kind = kind
-        lib.run_op(bpy.ops.splitforge.connector_add, u=u, v=v)
+    t.kind, t.width_mm, t.custom_object = 'CYL_PIN', 8.0, knob
+    cut.distribution, cut.connector_count, cut.connector_rows = 'GRID', 2, 2
+    lib.run_op(bpy.ops.splitforge.connector_add_auto)
+    assert len(cut.connectors) == 4, len(cut.connectors)
+    for c, kind in zip(cut.connectors, ('DOVETAIL', 'SNAP_PIN', 'CUSTOM', 'DOWEL')):
+        c.kind, c.width_mm, c.height_mm = kind, 5.0, 5.0
     for quality in ('AUTO', 'ACCURATE'):
         bpy.context.scene.splitforge.boolean_quality = quality
         lib.select_only([monkey])
