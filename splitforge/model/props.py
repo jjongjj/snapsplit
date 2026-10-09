@@ -25,11 +25,20 @@ from bpy.types import PropertyGroup
 from ..core import naming
 from ..profiles import MATERIAL_PROFILES
 
-SCHEMA_VERSION = 2   # 2: STROKE cuts (points, direction)
+SCHEMA_VERSION = 3   # 2: STROKE cuts (points, direction); 3: all connector types
 
 CONNECTOR_KINDS = [
     ('CYL_PIN', "Cylinder pin", "Round pin; width is the diameter", 'MESH_CYLINDER', 0),
-    ('RECT_TENON', "Rectangular tenon", "Box tenon of width x height", 'MESH_CUBE', 1),
+    ('RECT_TENON', "Rectangular tenon", "Box tenon of width x height (cannot rotate)", 'MESH_CUBE', 1),
+    ('DOVETAIL', "Dovetail", "Tapered tenon: narrower towards the tip, self-centering", 'MESH_CONE', 2),
+    ('SNAP_PIN', "Snap pin", "Cylinder pin with snap bumps that click into dimples in the socket",
+     'MESH_UVSPHERE', 3),
+    ('SNAP_TENON', "Snap tenon", "Rectangular tenon with snap bumps", 'MESH_ICOSPHERE', 4),
+    ('SNAP_DOVETAIL', "Snap dovetail", "Tapered tenon with snap bumps", 'MESH_CAPSULE', 5),
+    ('CUSTOM', "Custom mesh", "Any closed mesh object as the pin, scaled into width x height x length; "
+     "the socket is its outline offset by the clearance", 'MESH_MONKEY', 6),
+    ('DOWEL', "Dowel (separate part)", "Sockets in both parts and a separate printable dowel part",
+     'MESH_CYLINDER', 7),
 ]
 
 PIN_SIDES = [
@@ -53,6 +62,11 @@ def _redraw(_self, context):
             area.tag_redraw()
 
 
+def _custom_poll(self, obj):
+    """Custom connector meshes: any mesh object except the stack owner itself."""
+    return obj.type == 'MESH' and obj != self.id_data
+
+
 def _material_changed(self, context):
     self.clearance_mm = MATERIAL_PROFILES.get(self.material, self.clearance_mm)
 
@@ -72,10 +86,28 @@ class SPLITFORGE_PG_Connector(PropertyGroup):
     height_mm: FloatProperty(name="Height (mm)", default=5.0, min=0.5, soft_max=50.0, update=_redraw,
                              description="Tenon height (rectangular tenon only)")
     length_mm: FloatProperty(name="Length (mm)", default=10.0, min=1.0, soft_max=100.0, update=_redraw,
-                             description="Total pin length; half of it sticks out of the pin part")
+                             description="Total pin (or dowel) length; Insert depth % of it sits in the pin part")
     pin_side: EnumProperty(name="Pin side", items=PIN_SIDES, default='A', update=_redraw)
     clearance_mm: FloatProperty(name="Clearance (mm)", default=-1.0, min=-1.0, max=2.0, precision=2,
                                 description="Socket clearance per side; -1 uses the scene default")
+    embed_pct: FloatProperty(name="Insert depth %", default=50.0, min=20.0, max=80.0, update=_redraw,
+                             description="Share of the length that sits inside the pin part (the rest "
+                                         "sticks out into the socket); dowels always use 50 %")
+    taper_pct: FloatProperty(name="Taper %", default=20.0, min=0.0, max=60.0, update=_redraw,
+                             description="Dovetail: how much narrower the tip is than the base, percent")
+    chamfer_mm: FloatProperty(name="Chamfer (mm)", default=0.0, min=0.0, soft_max=2.0, precision=2,
+                              update=_redraw,
+                              description="Bevel of the pin tip (dowel: both ends), eases insertion")
+    snap_count: IntProperty(name="Bumps", default=2, min=1, max=8, update=_redraw,
+                            description="Snap bumps evenly around the pin")
+    snap_diameter_mm: FloatProperty(name="Bump diameter (mm)", default=2.0, min=0.4, soft_max=6.0,
+                                    precision=2, update=_redraw, description="Diameter of a snap bump")
+    snap_protrusion_mm: FloatProperty(name="Bump height (mm)", default=0.6, min=0.1, soft_max=3.0,
+                                      precision=2, update=_redraw,
+                                      description="How far a snap bump stands out of the pin surface")
+    custom_object: PointerProperty(name="Mesh", type=bpy.types.Object, poll=_custom_poll, update=_redraw,
+                                   description="Closed mesh used as the pin (custom connectors); its local "
+                                               "Z is the insertion direction, lowest Z the embedded end")
 
 
 class SPLITFORGE_PG_Point(PropertyGroup):
@@ -152,10 +184,8 @@ class SPLITFORGE_PG_Settings(PropertyGroup):
     material: EnumProperty(name="Material", items=MATERIALS, default='PLA', update=_material_changed)
     clearance_mm: FloatProperty(name="Clearance (mm)", default=0.20, min=0.0, max=2.0, precision=2,
                                 description="Default socket clearance per side")
-    new_connector_kind: EnumProperty(name="Type", items=CONNECTOR_KINDS, default='CYL_PIN')
-    new_connector_width_mm: FloatProperty(name="Width (mm)", default=5.0, min=0.5, soft_max=50.0)
-    new_connector_height_mm: FloatProperty(name="Height (mm)", default=5.0, min=0.5, soft_max=50.0)
-    new_connector_length_mm: FloatProperty(name="Length (mm)", default=10.0, min=1.0, soft_max=100.0)
+    new_connector: PointerProperty(type=SPLITFORGE_PG_Connector, name="New connector",
+                                   description="Type and size of connectors added by Distribute or clicking")
     easy_axis: EnumProperty(name="Axis", default='Z', items=[
         ('X', "X", "World X"), ('Y', "Y", "World Y"), ('Z', "Z", "World Z")])
     easy_offset_mm: FloatProperty(name="Offset (mm)", default=0.0, precision=2,

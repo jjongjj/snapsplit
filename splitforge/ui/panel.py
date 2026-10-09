@@ -4,14 +4,18 @@
 # ui/panel.py
 """N-panel: Draft/Easy workflow (main panel + Connectors, Build & Export, Settings).
 
-The legacy SnapSplit panel is registered afterwards as a collapsed "Legacy"
-sub-panel of the main panel (see ui.py).
+Connector settings are drawn by ``draw_connector`` for both the new-connector
+template (type and size of connectors added by Distribute or clicking) and the
+active connector (plus position, rotation, pin side, clearance).
 """
 
 import bpy
+from bpy.app.translations import pgettext_iface as iface
 from bpy.types import Panel, UIList
 
+from ..connectors import shapes
 from ..core import naming, units, validate
+from ..cuts import build
 from ..model import stack as stack_api
 from ..ops.ops_export import built_parts
 
@@ -37,6 +41,12 @@ class SPLITFORGE_UL_cuts(UIList):
             row.label(text="", icon='ERROR')
 
 
+# Short connector type names for the list (full names are the enum items)
+KIND_SHORT = {'CYL_PIN': "Pin", 'RECT_TENON': "Tenon", 'DOVETAIL': "Dovetail", 'SNAP_PIN': "Snap pin",
+              'SNAP_TENON': "Snap tenon", 'SNAP_DOVETAIL': "Snap dovetail", 'CUSTOM': "Custom",
+              'DOWEL': "Dowel"}
+
+
 class SPLITFORGE_UL_connectors(UIList):
     """Connectors: short label (number, type, pin side); position/size in the box below."""
     bl_idname = naming.cls("UL", "connectors")
@@ -44,8 +54,77 @@ class SPLITFORGE_UL_connectors(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
         row = layout.row(align=True)
         row.prop(item, "enabled", text="")
-        kind = "Pin" if item.kind == 'CYL_PIN' else "Tenon"
-        row.label(text=f"{index + 1} {kind}  pin {item.pin_side}")
+        kind = iface(KIND_SHORT.get(item.kind, item.kind))
+        side = iface("both sides") if item.kind == 'DOWEL' else f"{iface('pin')} {item.pin_side}"
+        row.label(text=f"{index + 1} {kind}  {side}", translate=False)
+        if item.kind == 'CUSTOM' and custom_problem(item.custom_object):
+            row.label(text="", icon='ERROR')
+
+
+# Custom mesh validation for drawing: (object name, mesh name, counts) -> message ("" = usable).
+# Plain strings only; recomputed when the mesh changes.
+_CUSTOM_PROBLEMS = {}
+
+
+def custom_problem(obj):
+    """'' if ``obj`` is usable as a custom connector mesh, else the reason (cached for drawing)."""
+    if obj is None:
+        return "no custom mesh object chosen"
+    if obj.type != 'MESH':
+        return f"custom connector '{obj.name}' is not a mesh object"
+    me = obj.data
+    key = (obj.name, me.name, len(me.vertices), len(me.edges), len(me.polygons))
+    if key not in _CUSTOM_PROBLEMS:
+        if len(_CUSTOM_PROBLEMS) > 64:
+            _CUSTOM_PROBLEMS.clear()
+        _CUSTOM_PROBLEMS[key] = build.custom_shape_of(obj)[1]
+    return _CUSTOM_PROBLEMS[key]
+
+
+def draw_connector(layout, c, template=False):
+    """Type-specific fields of a connector (``template``: the new-connector settings, no position)."""
+    col = layout.column(align=True)
+    col.prop(c, "kind", text="")
+    kind = c.kind
+    if kind == 'CUSTOM':
+        row = col.row(align=True)
+        row.prop(c, "custom_object", text="")
+        op = row.operator(OP("connector_custom_size"), text="", icon='FULLSCREEN_ENTER')
+        op.target = 'NEW' if template else 'ACTIVE'
+        problem = custom_problem(c.custom_object)
+        if problem:
+            warn = col.column(align=True)
+            warn.alert = True
+            for line in _wrap(problem, 34):
+                warn.label(text=line, translate=False)
+    row = col.row(align=True)
+    row.prop(c, "width_mm", text="W")
+    if kind not in shapes.ROUND_KINDS:
+        row.prop(c, "height_mm", text="H")
+    row.prop(c, "length_mm", text="L")
+    if kind in shapes.TAPER_KINDS:
+        col.prop(c, "taper_pct")
+    if kind in shapes.SNAP_KINDS:
+        sub = col.column(align=True)
+        sub.prop(c, "snap_count")
+        sub.prop(c, "snap_diameter_mm")
+        sub.prop(c, "snap_protrusion_mm")
+    if kind != 'DOWEL':
+        col.prop(c, "embed_pct")
+    if kind != 'CUSTOM':
+        col.prop(c, "chamfer_mm")
+    if template:
+        return
+    col = layout.column(align=True)
+    row = col.row(align=True)
+    row.prop(c, "u")
+    row.prop(c, "v")
+    col.prop(c, "rotation_deg")
+    if kind != 'DOWEL':
+        row = layout.row(align=True)
+        row.label(text="Pin on")
+        row.prop(c, "pin_side", expand=True)
+    layout.prop(c, "clearance_mm")
 
 
 class _Base:
@@ -188,13 +267,9 @@ class SPLITFORGE_PT_connectors(_Base, Panel):
         s = getattr(context.scene, naming.SCENE_SETTINGS)
         layout.label(text=f"On {cut.name}")
 
-        col = layout.column(align=True)
-        col.prop(s, "new_connector_kind", text="")
-        row = col.row(align=True)
-        row.prop(s, "new_connector_width_mm", text="W")
-        if s.new_connector_kind == 'RECT_TENON':
-            row.prop(s, "new_connector_height_mm", text="H")
-        row.prop(s, "new_connector_length_mm", text="L")
+        box = layout.box()
+        box.label(text="New connectors")
+        draw_connector(box, s.new_connector, template=True)
         col = layout.column(align=True)
         col.row(align=True).prop(cut, "distribution", expand=True)
         row = col.row(align=True)
@@ -204,6 +279,9 @@ class SPLITFORGE_PT_connectors(_Base, Panel):
         col.prop(cut, "margin_pct")
         row = layout.row(align=True)
         row.operator(OP("connector_add_auto"), text="Distribute", icon='SNAP_FACE_CENTER')
+        click = row.row(align=True)
+        click.operator_context = 'INVOKE_REGION_WIN'
+        click.operator(OP("connector_add_click"), text="Click", icon='RESTRICT_SELECT_OFF')
         row.operator(OP("connector_add"), text="", icon='ADD')
         row.operator(OP("connector_remove"), text="", icon='REMOVE')
 
@@ -212,21 +290,7 @@ class SPLITFORGE_PT_connectors(_Base, Panel):
         if not cut.connectors:
             return
         c = cut.connectors[min(cut.active_connector, len(cut.connectors) - 1)]
-        box = layout.box()
-        box.prop(c, "kind", text="")
-        row = box.row(align=True)
-        row.prop(c, "u")
-        row.prop(c, "v")
-        box.prop(c, "rotation_deg")
-        row = box.row(align=True)
-        row.prop(c, "width_mm", text="W")
-        if c.kind == 'RECT_TENON':
-            row.prop(c, "height_mm", text="H")
-        row.prop(c, "length_mm", text="L")
-        row = box.row(align=True)
-        row.label(text="Pin on")
-        row.prop(c, "pin_side", expand=True)
-        box.prop(c, "clearance_mm")
+        draw_connector(layout.box(), c)
 
 
 class SPLITFORGE_PT_build(_Base, Panel):

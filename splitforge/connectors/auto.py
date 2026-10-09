@@ -35,7 +35,7 @@ from mathutils.bvhtree import BVHTree
 from ..core import meshlib, naming, units
 from ..cuts import build
 from ..model import stack as stack_api
-from . import fit, placement
+from . import fit, placement, shapes
 
 # Material kept around a pin or socket (mm)
 MIN_WALL_MM = 0.4
@@ -148,25 +148,41 @@ def seam_regions_mm(context, obj, cut):
     return _plane_regions(context, obj, spec, others), source_bvh
 
 
-def reach_mm(kind, width_mm, height_mm):
+def reach_mm(kind, width_mm, height_mm, snap_protrusion_mm=0.0):
     """Largest in-plane distance of a connector's outline from its center (any rotation)."""
-    if kind == 'RECT_TENON':
-        return 0.5 * math.hypot(width_mm, height_mm)
-    return 0.5 * width_mm
+    return shapes.reach(kind, width_mm, height_mm, snap_protrusion_mm)
 
 
-def add_auto(context, obj, cut, kind, width_mm, height_mm, length_mm, replace=True):
+def add_auto(context, obj, cut, kind=None, width_mm=5.0, height_mm=5.0, length_mm=10.0, replace=True,
+             template=None):
     """Fill ``cut.connectors`` from its distribution settings (per seam region).
 
-    Returns an AutoResult (positions added / moved inward / dropped, with the
-    reasons for the dropped ones). Nothing changes when no position fits (the
-    cut misses the object, or every seam is too small for the connector).
-    Raises build.BuildError for an invalid stroke cut.
+    The connector type and size come from ``template`` (a connector PropertyGroup,
+    e.g. the scene's new-connector settings: every value is copied) or from
+    ``kind``/``width_mm``/``height_mm``/``length_mm``. Returns an AutoResult
+    (positions added / moved inward / dropped, with the reasons for the dropped
+    ones). Nothing changes when no position fits (the cut misses the object, or
+    every seam is too small for the connector). Raises build.BuildError for an
+    invalid stroke cut or an unusable custom mesh.
     """
     scene = context.scene
+    if template is not None:
+        values = build.connector_values(template)
+    else:
+        values = {"kind": kind, "width_mm": width_mm, "height_mm": height_mm, "length_mm": length_mm}
+    custom = None
+    if values["kind"] == 'CUSTOM':
+        custom, why = build.custom_shape_of(template.custom_object if template is not None else None,
+                                            context.evaluated_depsgraph_get())
+        if custom is None:
+            raise build.BuildError(why[:1].upper() + why[1:])
     clearance = build.default_clearance(getattr(scene, naming.SCENE_SETTINGS, None))
-    inset = reach_mm(kind, width_mm, height_mm) + clearance + MIN_WALL_MM
-    spacing = 2.0 * (reach_mm(kind, width_mm, height_mm) + clearance) + MIN_WALL_MM
+    if template is not None and template.clearance_mm >= 0.0:
+        clearance = template.clearance_mm
+    reach = reach_mm(values["kind"], values["width_mm"], values["height_mm"],
+                     values.get("snap_protrusion_mm", 0.0))
+    inset = reach + clearance + MIN_WALL_MM
+    spacing = 2.0 * (reach + clearance) + MIN_WALL_MM
     wall = units.mm_to_scene(MIN_WALL_MM, scene)
     regions, bvh = seam_regions_mm(context, obj, cut)
     stack = stack_api.get_stack(obj)
@@ -175,11 +191,13 @@ def add_auto(context, obj, cut, kind, width_mm, height_mm, length_mm, replace=Tr
         obj, [c for c in stack.cuts if c.enabled and c.uid != cut.uid], scene)]
     own = spec.barrier() if spec.kind == 'STROKE' else None
     step = units.mm_to_scene(build.FIT_STEP_MM, scene)
+    extra = {k: v for k, v in values.items() if k not in ("kind", "width_mm", "height_mm", "length_mm")}
 
     def misfit(u, v):
         """'' when a connector at (u, v) fits in 3D, else the reason key."""
-        cspec = build.make_spec(obj, cut, scene, "", u, v, 0.0, kind, width_mm, height_mm, length_mm,
-                                clearance, 'A', spec)
+        cspec = build.make_spec(obj, cut, scene, "", u, v, 0.0, values["kind"], values["width_mm"],
+                                values["height_mm"], values["length_mm"], clearance, 'A', spec,
+                                custom=custom, **extra)
         return fit.check(cspec, bvh, others, wall, both_sides=True, max_step=step, own=own).reason(wall)
 
     result, points = AutoResult(), []
@@ -214,10 +232,13 @@ def add_auto(context, obj, cut, kind, width_mm, height_mm, length_mm, replace=Tr
     if replace:
         cut.connectors.clear()
     for u, v in points:
+        if template is not None:
+            stack_api.add_connector(cut, template, u, v)
+            continue
         c = cut.connectors.add()
-        c.kind = kind
+        c.kind = values["kind"]
         c.u, c.v = u, v
-        c.width_mm, c.height_mm, c.length_mm = width_mm, height_mm, length_mm
+        c.width_mm, c.height_mm, c.length_mm = values["width_mm"], values["height_mm"], values["length_mm"]
     cut.active_connector = max(0, len(cut.connectors) - 1)
     result.added = len(points)
     return result

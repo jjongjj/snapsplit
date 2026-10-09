@@ -5,12 +5,12 @@
 """Connector record operators for the active cut: auto distribution, add one, remove."""
 
 import bpy
-from bpy.props import BoolProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 from bpy.types import Operator
 
 from ..connectors import auto
 from ..cuts import build
-from ..core import naming
+from ..core import naming, units
 from ..model import stack as stack_api
 
 
@@ -51,8 +51,7 @@ class SPLITFORGE_OT_connector_add_auto(_CutOp, Operator):
             return {'CANCELLED'}
         s = _settings(context)
         try:
-            res = auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
-                                s.new_connector_height_mm, s.new_connector_length_mm, self.replace)
+            res = auto.add_auto(context, obj, cut, replace=self.replace, template=s.new_connector)
         except build.BuildError as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
@@ -80,13 +79,7 @@ class SPLITFORGE_OT_connector_add(_CutOp, Operator):
         cut = self._cut(obj)
         if cut is None:
             return {'CANCELLED'}
-        s = _settings(context)
-        c = cut.connectors.add()
-        c.kind = s.new_connector_kind
-        c.u, c.v = self.u, self.v
-        c.width_mm, c.height_mm, c.length_mm = (s.new_connector_width_mm, s.new_connector_height_mm,
-                                                s.new_connector_length_mm)
-        cut.active_connector = len(cut.connectors) - 1
+        stack_api.add_connector(cut, _settings(context).new_connector, self.u, self.v)
         return {'FINISHED'}
 
 
@@ -111,10 +104,39 @@ class SPLITFORGE_OT_connector_remove(_CutOp, Operator):
         return {'FINISHED'}
 
 
+class SPLITFORGE_OT_connector_custom_size(Operator):
+    """Set width, height and length of a custom connector to its mesh object's size (mm)"""
+    bl_idname = naming.op("connector_custom_size")
+    bl_label = "Use Object Size"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target: EnumProperty(name="Target", default='ACTIVE', items=[
+        ('ACTIVE', "Active connector", "The active connector of the active cut"),
+        ('NEW', "New connector", "The new-connector settings")])
+
+    def execute(self, context):
+        if self.target == 'NEW':
+            c = _settings(context).new_connector
+        else:
+            cut = stack_api.active_cut(stack_api.context_owner(context))
+            if cut is None or not cut.connectors:
+                self.report({'ERROR'}, "No active connector")
+                return {'CANCELLED'}
+            c = cut.connectors[min(cut.active_connector, len(cut.connectors) - 1)]
+        obj = c.custom_object
+        if obj is None:
+            self.report({'ERROR'}, "Choose a custom mesh object first")
+            return {'CANCELLED'}
+        f = units.scene_to_mm(1.0, context.scene)
+        c.width_mm, c.height_mm, c.length_mm = (max(d * f, 0.5) for d in obj.dimensions)
+        return {'FINISHED'}
+
+
 classes = (
     SPLITFORGE_OT_connector_add_auto,
     SPLITFORGE_OT_connector_add,
     SPLITFORGE_OT_connector_remove,
+    SPLITFORGE_OT_connector_custom_size,
 )
 
 

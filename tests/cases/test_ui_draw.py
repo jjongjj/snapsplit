@@ -112,6 +112,33 @@ def run(ctx):
     assert n_conn == 4, n_conn  # 2 per seam region, the Z cut splits the X seam in two
     assert len(fills) == 1 and len(lines) == 2 + n_conn, (len(fills), len(lines))
 
+    # Every connector type: its own fields for the active connector and the new-connector template
+    active = cube.splitforge_stack.cuts[1].connectors[0]
+    template = bpy.context.scene.splitforge.new_connector
+    expect = {
+        'CYL_PIN': ({"embed_pct", "chamfer_mm", "pin_side"}, {"height_mm", "taper_pct", "snap_count"}),
+        'RECT_TENON': ({"height_mm", "embed_pct"}, {"taper_pct", "snap_count", "custom_object"}),
+        'DOVETAIL': ({"taper_pct", "height_mm"}, {"snap_count"}),
+        'SNAP_PIN': ({"snap_count", "snap_diameter_mm", "snap_protrusion_mm"}, {"taper_pct", "height_mm"}),
+        'SNAP_TENON': ({"snap_count", "height_mm"}, {"taper_pct"}),
+        'SNAP_DOVETAIL': ({"snap_count", "taper_pct"}, set()),
+        'CUSTOM': ({"custom_object", "height_mm"}, {"chamfer_mm", "taper_pct"}),
+        'DOWEL': ({"chamfer_mm"}, {"pin_side", "embed_pct", "height_mm"}),
+    }
+    for kind, (shown, hidden) in expect.items():
+        active.kind = kind
+        template.kind = kind
+        log = _draw_all(kind)
+        props = {e[1] for e in log if e[0] == "prop"}
+        assert shown <= props and not (hidden & props), (kind, shown - props, hidden & props)
+        assert ("operator", "splitforge.connector_add_click") in log, kind
+        if kind == 'CUSTOM':
+            assert ("operator", "splitforge.connector_custom_size") in log
+            assert ("label", "no custom mesh object chosen") in log, log
+        fills, lines = overlay.geometry(bpy.context)
+        assert len(lines) == 2 + n_conn, (kind, len(lines))
+    active.kind = template.kind = 'RECT_TENON'
+
     cube.splitforge_stack.cuts[0].enabled = True
     lib.run_op(bpy.ops.splitforge.build)
     # Active object is now a part: the panel shows the source stack and the result

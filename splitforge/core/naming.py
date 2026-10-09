@@ -33,6 +33,11 @@ PROP_CUT_IDS = "splitforge_cut_ids"
 # collection the source object that owns it
 PROP_SOURCE_OBJECT = "splitforge_source_object"
 PROP_OWNER = "splitforge_owner"
+# On a dowel part: label of the connector it belongs to
+PROP_DOWEL = "splitforge_dowel"
+
+# Dowel part names: <source><DOWEL_SUFFIX><n>
+DOWEL_SUFFIX = "_Dowel_"
 
 # Collections
 BUILD_COLLECTION_PREFIX = "SplitForge_Build_"

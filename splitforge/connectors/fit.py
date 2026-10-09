@@ -14,8 +14,10 @@ reaches length/2 + clearance into the other side. Two things can go wrong:
 - On a curved (stroke) seam the straight pin can cross its OWN seam again
   where the ribbon bends towards it.
 
-``check`` samples the outer surface of the pin and socket solids (the spans
-and sizes Build uses) on a grid with at most ``max_step`` spacing and tests:
+``check`` samples the surface of every solid of the connector -- the very
+solids Build adds (connectors/shapes.py): pin, socket, snap bumps and dimples,
+both sockets of a dowel, a custom mesh and its offset socket -- with at most
+``max_step`` spacing and tests:
 
 1. every OTHER enabled cut (a "barrier": PlaneBarrier for planes, the
    infinite plane; RibbonBarrier for strokes, the actual extended ribbon via
@@ -37,8 +39,6 @@ from mathutils import Vector
 
 from . import shapes
 
-MIN_RING = 24
-MIN_RINGS = 9
 # Curved seams: samples within half gap + max(wall, OWN_SKIP * length) of the seam straddle it by design
 # (own_margin gives them a fading bonus)
 OWN_SKIP = 0.05
@@ -132,53 +132,14 @@ def _barrier(item):
     return PlaneBarrier(*item) if isinstance(item, tuple) else item
 
 
-def _outline(kind, width, height, max_step=None):
-    """Closed cross-section outline (local XY) of a CYL_PIN or RECT_TENON."""
-    if kind == 'RECT_TENON':
-        hw, hh = width * 0.5, height * 0.5
-        per_edge = 4 if not max_step else max(4, math.ceil(max(width, height) / max_step))
-        pts = []
-        for (x0, y0), (x1, y1) in (((-hw, -hh), (hw, -hh)), ((hw, -hh), (hw, hh)),
-                                   ((hw, hh), (-hw, hh)), ((-hw, hh), (-hw, -hh))):
-            pts += [(x0 + (x1 - x0) * k / per_edge, y0 + (y1 - y0) * k / per_edge) for k in range(per_edge)]
-        return pts
-    r = width * 0.5
-    n = MIN_RING if not max_step else max(MIN_RING, math.ceil(2 * math.pi * r / max_step))
-    return [(r * math.cos(2 * math.pi * k / n), r * math.sin(2 * math.pi * k / n)) for k in range(n)]
-
-
-def solid_grid(kind, width, height, z0, z1, matrix, max_step=None):
-    """Point rings covering the side of a connector solid, plus the two cap centers.
-
-    Returns ``(rings, caps)``: closed world-space point rings from z0 to z1,
-    and the cap centers at z0 and z1.
-    """
-    outline = _outline(kind, width, height, max_step)
-    n_rings = MIN_RINGS if not max_step else max(MIN_RINGS, math.ceil(abs(z1 - z0) / max_step) + 1)
-    rings = []
-    for k in range(n_rings):
-        z = z0 + (z1 - z0) * k / (n_rings - 1)
-        rings.append([matrix @ Vector((x, y, z)) for x, y in outline])
-    return rings, [matrix @ Vector((0.0, 0.0, z)) for z in (z0, z1)]
-
-
-def solid_samples(kind, width, height, z0, z1, matrix, max_step=None):
-    """World points on the surface of a connector solid spanning z0..z1."""
-    rings, caps = solid_grid(kind, width, height, z0, z1, matrix, max_step)
-    return caps + [p for ring in rings for p in ring]
-
-
-def _grids(spec, pin_positive, max_step):
-    pin, socket = shapes.pin_and_socket_spans(spec.length, spec.clearance, spec.gap, pin_positive)
-    c2 = 2.0 * spec.clearance
-    return (solid_grid(spec.kind, spec.width, spec.height, *pin, spec.matrix, max_step),
-            solid_grid(spec.kind, spec.width + c2, spec.height + c2, *socket, spec.matrix, max_step))
+def spec_solids(spec, pin_positive=None):
+    """The solids of a ConnectorSpec for a pin side (connectors/shapes.py: what Build adds)."""
+    return shapes.connector_solids(spec, pin_positive).all()
 
 
 def spec_samples(spec, pin_positive=None, max_step=None):
-    """Surface samples of the pin and the socket of a ConnectorSpec."""
-    side = spec.pin_positive if pin_positive is None else pin_positive
-    return [p for rings, caps in _grids(spec, side, max_step) for p in caps + [q for r in rings for q in r]]
+    """Surface samples of every solid of a ConnectorSpec (pin, sockets, snap bumps, ...)."""
+    return [p for solid in spec_solids(spec, pin_positive) for p in solid.samples(max_step)]
 
 
 def _crossings(bvh, point, direction):
@@ -231,20 +192,9 @@ def _segment_hits(bvh, a, b):
     return bvh.ray_cast(a, d / length, length)[0] is not None
 
 
-def _pierced(bvh, grid):
+def _pierced(bvh, segments):
     """True if a segment between neighbouring samples crosses the surface."""
-    rings, caps = grid
-    for i, ring in enumerate(rings):
-        n = len(ring)
-        for k in range(n):
-            if _segment_hits(bvh, ring[k], ring[(k + 1) % n]):
-                return True
-            if i + 1 < len(rings) and _segment_hits(bvh, ring[k], rings[i + 1][k]):
-                return True
-    for center, ring in ((caps[0], rings[0]), (caps[1], rings[-1])):
-        if any(_segment_hits(bvh, center, p) for p in ring):
-            return True
-    return False
+    return any(_segment_hits(bvh, a, b) for a, b in segments)
 
 
 def plane_margin(spec, planes, pin_positive=None, max_step=None):
@@ -307,13 +257,13 @@ def check(spec, bvh, planes=(), wall=0.0, both_sides=False, max_step=None, own=N
         if res.own_margin < own_required(wall):
             return res
     for side in sides:
-        grids = _grids(spec, side, max_step)
-        for rings, caps in grids:
-            for p in caps + [q for r in rings for q in r]:
+        solids = spec_solids(spec, side)
+        for solid in solids:
+            for p in solid.samples(max_step):
                 res.surface_depth = min(res.surface_depth, depth_inside(bvh, p))
                 if res.surface_depth < wall:
                     return res
-        if any(_pierced(bvh, g) for g in grids):
+        if any(_pierced(bvh, solid.segments_for(max_step)) for solid in solids):
             res.pierced = True
             return res
     return res

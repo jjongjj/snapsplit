@@ -6,13 +6,16 @@
 
 All connectors of a build are first assigned to parts: the pin goes to the
 part just behind the seam on the pin side, the socket to the part on the other
-side (point-in-mesh probes, so any number of earlier/later cuts works). The
-solids of one part are joined into a single operand, so every part gets at most
-one UNION and one DIFFERENCE, however many connectors it carries.
+side (point-in-mesh probes, so any number of earlier/later cuts works). A
+double-sided dowel has a socket in both parts and becomes a separate dowel
+part. The solids of one part (connectors/shapes.py) are joined into a single
+operand, so every part gets at most one UNION and one DIFFERENCE, however many
+connectors it carries. Solids that overlap inside one operand (snap bumps on
+their pin, custom meshes, connectors placed into each other) mark the part, so
+its booleans use self-intersection handling.
 """
 
-import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import bmesh
 from mathutils import Matrix, Vector
@@ -38,6 +41,22 @@ class ConnectorSpec:
     gap: float
     pin_positive: bool
     cut_uid: str = ""     # cut the connector belongs to (its plane is not an "other" plane)
+    taper: float = 0.0            # DOVETAIL kinds: fraction of the width the tip loses
+    embed: float = 0.5            # share of the length inside the pin part
+    chamfer: float = 0.0          # pin tip / dowel end chamfer
+    snap_count: int = 2           # SNAP kinds: bumps around the pin
+    snap_diameter: float = 2.0
+    snap_protrusion: float = 0.6  # how far a bump stands out of the pin surface
+    custom: object = None         # CUSTOM: shapes.CustomShape
+
+
+@dataclass
+class DowelSpec:
+    """A separate dowel part (world-space lengths, Blender units)."""
+    label: str
+    diameter: float
+    length: float
+    chamfer: float
 
 
 def _containing_piece(bvhs, point):
@@ -87,23 +106,24 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
     the uncut source) and ``planes`` ({cut uid: fit barrier} of the enabled
     cuts) a connector whose pin or socket would break through the outer surface,
     reach across another cut into a third part or cross its own curved seam is
-    skipped with a warning (connectors/fit.py, samples at most ``max_step`` apart). Returns
-    ``(pins, sockets, warnings, overlapping)``: ``pins``/``sockets`` are dicts
-    piece index -> bmesh (caller frees them), ``overlapping`` the set of piece
-    indices where two connector solids may intersect.
+    skipped with a warning (connectors/fit.py, samples at most ``max_step`` apart).
+    Returns ``Assignment`` (``pins``/``sockets``: dicts piece index -> bmesh, the
+    caller frees them; ``overlapping``: piece indices whose operands have
+    intersecting solids; ``dowels``: DowelSpec list).
     """
     bvhs = [BVHTree.FromBMesh(bm) for bm in pieces]
-    pins, sockets, warnings = {}, {}, []
-    capsules, overlapping = {}, set()
+    out = Assignment()
+    capsules = {}
     for spec in specs:
         center = spec.matrix.translation
         n = Vector(spec.matrix.col[2][:3]).normalized()
-        s = 1.0 if spec.pin_positive else -1.0
+        positive = spec.pin_positive or spec.kind == 'DOWEL'
+        s = 1.0 if positive else -1.0
         depth = spec.gap * 0.5 + 0.25 * spec.length
         pin_piece = _containing_piece(bvhs, center + n * (s * depth))
         socket_piece = _containing_piece(bvhs, center - n * (s * depth))
         if pin_piece is None or socket_piece is None or pin_piece == socket_piece:
-            warnings.append(f"{spec.label}: not on a seam between two parts, skipped")
+            out.warnings.append(f"{spec.label}: not on a seam between two parts, skipped")
             continue
         if source_bvh is not None:
             others = [pl for uid, pl in (planes or {}).items() if uid != spec.cut_uid]
@@ -112,34 +132,43 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
             tol = -SURFACE_TOLERANCE * spec.length
             res = fit.check(spec, source_bvh, others, tol, max_step=max_step, own=own)
             if res.plane_margin < tol:
-                warnings.append(f"{spec.label}: pin or socket would reach across another cut into a part "
-                                "without a socket, skipped (move it, or Distribute again)")
+                out.warnings.append(f"{spec.label}: pin or socket would reach across another cut into a part "
+                                    "without a socket, skipped (move it, or Distribute again)")
                 continue
             if res.own_margin < 0.0:
-                warnings.append(f"{spec.label}: the curved seam bends into the pin or socket, skipped "
-                                "(move it to a flatter part of the seam, or use a shorter connector)")
+                out.warnings.append(f"{spec.label}: the curved seam bends into the pin or socket, skipped "
+                                    "(move it to a flatter part of the seam, or use a shorter connector)")
                 continue
             if not res.ok(tol):
-                warnings.append(f"{spec.label}: pin or socket would break through the outer surface, skipped "
-                                "(move it inward, or Distribute again)")
+                out.warnings.append(f"{spec.label}: pin or socket would break through the outer surface, "
+                                    "skipped (move it inward, or Distribute again)")
                 continue
-        pin_span, socket_span = shapes.pin_and_socket_spans(
-            spec.length, spec.clearance, spec.gap, spec.pin_positive)
-        # Capsule around pin + socket: axis segment and in-plane reach
-        zs = pin_span + socket_span
-        capsule = (spec.matrix @ Vector((0.0, 0.0, min(zs))), spec.matrix @ Vector((0.0, 0.0, max(zs))),
-                   0.5 * math.hypot(spec.width, spec.height if spec.kind == 'RECT_TENON' else 0.0)
-                   + spec.clearance)
+        solids = shapes.connector_solids(spec)
+        capsule = shapes.capsule(spec, solids)
         for piece in (pin_piece, socket_piece):
             if any(_capsules_touch(capsule, other) for other in capsules.get(piece, ())):
-                overlapping.add(piece)
+                out.overlapping.add(piece)
             capsules.setdefault(piece, []).append(capsule)
-        shapes.add_solid(pins.setdefault(pin_piece, bmesh.new()), spec.kind, spec.width, spec.height,
-                         *pin_span, spec.matrix)
-        c2 = 2.0 * spec.clearance
-        shapes.add_solid(sockets.setdefault(socket_piece, bmesh.new()), spec.kind, spec.width + c2,
-                         spec.height + c2, *socket_span, spec.matrix)
-    return pins, sockets, warnings, overlapping
+        if len(solids.pin) > 1 or len(solids.socket) > 1 or spec.kind == 'CUSTOM':
+            # Snap bumps overlap their pin (dimples their socket); an offset custom mesh may fold
+            out.overlapping.update((pin_piece, socket_piece))
+        for table, piece, group in ((out.pins, pin_piece, solids.pin),
+                                    (out.sockets, pin_piece, solids.pin_socket),
+                                    (out.sockets, socket_piece, solids.socket)):
+            for solid in group:
+                solid.add_to(table.setdefault(piece, bmesh.new()))
+        if solids.dowel is not None:
+            out.dowels.append(DowelSpec(spec.label, *solids.dowel))
+    return out
+
+
+@dataclass
+class Assignment:
+    pins: dict = field(default_factory=dict)
+    sockets: dict = field(default_factory=dict)
+    warnings: list = field(default_factory=list)
+    overlapping: set = field(default_factory=set)
+    dowels: list = field(default_factory=list)
 
 
 def operations(pins, sockets):
