@@ -3,6 +3,7 @@
 
 import os
 import shutil
+import struct
 
 import bpy
 
@@ -52,6 +53,24 @@ def run(ctx):
             lib.assert_close(got, want, abs_=1e-3, msg=f"{name} STL size")
         bpy.data.objects.remove(imported[0])
 
+    # Raw file values: axes unchanged (identity mapping), millimeters
+    part = bpy.data.objects["Exp_A"]
+    want = [(min(v.co[i] for v in part.data.vertices), max(v.co[i] for v in part.data.vertices)) for i in range(3)]
+    with open(os.path.join(out, "Exp_A.stl"), "rb") as f:
+        data = f.read()
+    n = struct.unpack_from("<I", data, 80)[0]
+    pts = [struct.unpack_from("<3f", data, 84 + 50 * k + 12 + 12 * j) for k in range(n) for j in range(3)]
+    got = [(min(p[i] for p in pts), max(p[i] for p in pts)) for i in range(3)]
+    for (g0, g1), (w0, w1) in zip(got, want):
+        lib.assert_close(g0, w0, abs_=1e-3, msg="raw STL axes")
+        lib.assert_close(g1, w1, abs_=1e-3, msg="raw STL axes")
+    with open(os.path.join(out, "Exp_A.obj"), encoding="utf-8") as f:
+        vs = [tuple(map(float, line.split()[1:4])) for line in f if line.startswith("v ")]
+    got = [(min(p[i] for p in vs), max(p[i] for p in vs)) for i in range(3)]
+    for (g0, g1), (w0, w1) in zip(got, want):
+        lib.assert_close(g0, w0, abs_=1e-3, msg="raw OBJ axes")
+        lib.assert_close(g1, w1, abs_=1e-3, msg="raw OBJ axes")
+
     # FBX works in both Blender versions and is written in real units: importing the
     # 40 mm wide part into a meter scene gives 0.04 m (was 40 m before the unit fix)
     fbx_dir = os.path.join(out, "fbx")
@@ -59,7 +78,8 @@ def run(ctx):
     lib.run_op(bpy.ops.splitforge.export_parts, directory=fbx_dir, formats={'FBX'})
     assert sorted(os.listdir(fbx_dir)) == ["Exp_A.fbx", "Exp_B.fbx"]
     width_mm = bpy.data.objects["Exp_B"].dimensions.x
-    bpy.context.scene.unit_settings.length_unit = 'METERS'
+    us = bpy.context.scene.unit_settings
+    us.length_unit, us.scale_length = 'METERS', 1.0
     before = set(bpy.data.objects.keys())
     bpy.ops.import_scene.fbx(filepath=os.path.join(fbx_dir, "Exp_B.fbx"))
     imported = bpy.data.objects[(set(bpy.data.objects.keys()) - before).pop()]
@@ -85,10 +105,11 @@ def run(ctx):
     else:
         raise AssertionError("relative export folder in an unsaved file must fail")
 
-    # Centimeter scene: a 4-unit cube is 40 mm; the STL is written in millimeters
+    # Centimeter scene (Unit Scale 0.01, 1 unit = 10 mm): a 4-unit cube is 40 mm and
+    # the STL is written in millimeters
     bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
     us = bpy.context.scene.unit_settings
-    us.system, us.length_unit, us.scale_length = 'METRIC', 'CENTIMETERS', 1.0
+    us.system, us.length_unit, us.scale_length = 'METRIC', 'CENTIMETERS', 0.01
     parts = _build("ExpCm", 4.0)
     cm_dir = os.path.join(out, "cm")
     lib.run_op(bpy.ops.splitforge.export_parts, directory=cm_dir, formats={'STL'}, apply_scale_mm=True)

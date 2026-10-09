@@ -49,10 +49,13 @@ def run(ctx):
     moved.location = (50.0, 0.0, 0.0)
     assert validate(moved).transform_applied is True
 
-    # Meter scene
-    bpy.context.scene.unit_settings.length_unit = 'METERS'
+    assert validate(cube).mm_per_unit == 1.0
+    # Meter scene (Unit Scale 1): 1 unit = 1000 mm, reported
+    us = bpy.context.scene.unit_settings
+    us.length_unit, us.scale_length = 'METERS', 1.0
     rep = validate(cube)
-    assert rep.unit_is_mm is False and rep.manifold, rep
+    assert rep.unit_is_mm is False and rep.manifold and rep.mm_per_unit == 1000.0, rep
+    assert any("1 unit = 1000 mm" in m for m in rep.messages), rep.messages
     assert validate(cube, check_mesh=False).unit_is_mm is False
 
     # Non-mesh object

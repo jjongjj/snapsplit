@@ -7,11 +7,11 @@ import bpy
 
 
 def set_scene_mm(scene=None):
-    """Metric scene with millimeters as length unit and scale_length 1."""
+    """Standard 3D-print setup: Metric, Millimeters, Unit Scale 0.001 (1 BU = 1 mm)."""
     us = (scene or bpy.context.scene).unit_settings
     us.system = 'METRIC'
     us.length_unit = 'MILLIMETERS'
-    us.scale_length = 1.0
+    us.scale_length = 0.001
 
 
 def select_only(objs, active=None):
