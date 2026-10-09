@@ -445,6 +445,21 @@ class StrokeCutter:
 
     # --- point queries --------------------------------------------------------
 
+    def ribbon_face_interior(self, index, co):
+        """True if world point ``co`` on ribbon face ``index`` (of ``ribbon()``) lies strictly
+        between the face's two vertical edges, i.e. not on a corner of the curve."""
+        n = len(self.extended) - 1
+        i = index % n
+        (x0, y0), (x1, y1) = self.extended[i], self.extended[i + 1]
+        x, y = self.frame.to2d(co)
+        dx, dy = x1 - x0, y1 - y0
+        ll = dx * dx + dy * dy
+        if ll <= 0.0:
+            return False
+        f = ((x - x0) * dx + (y - y0) * dy) / ll
+        eps = 1e-4
+        return eps < f < 1.0 - eps
+
     def is_positive(self, p):
         """True if world point ``p`` is on the positive side of the ribbon (exact, 2D)."""
         if self._left is None:

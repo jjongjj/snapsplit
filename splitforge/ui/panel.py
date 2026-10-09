@@ -33,7 +33,7 @@ class SPLITFORGE_UL_cuts(UIList):
         row = layout.row(align=True)
         row.prop(item, "enabled", text="")
         row.prop(item, "name", text="", emboss=False)
-        if item.kind == 'STROKE' and item.problem:
+        if item.kind == 'STROKE' and stack_api.stroke_problem_cached(item.id_data, item, context.scene):
             row.label(text="", icon='ERROR')
 
 
@@ -109,11 +109,12 @@ def draw_draft(context, layout, stack):
     row.prop(cut, "enabled")
     if cut.kind == 'STROKE':
         box.prop(cut, "gap_mm")
-        if cut.problem:
+        problem = stack_api.stroke_problem_cached(stack_api.context_owner(context), cut, context.scene)
+        if problem:
             col = box.column(align=True)
             col.alert = True
             col.label(text="Cannot build this cut:", icon='ERROR')
-            for line in _wrap(cut.problem, 34):
+            for line in _wrap(problem, 34):
                 col.label(text=line)
         box.label(text=f"Stroke: {len(cut.points)} points", icon='CURVE_BEZCURVE')
         op_row = box.row()

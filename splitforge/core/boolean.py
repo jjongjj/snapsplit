@@ -172,6 +172,82 @@ def _evaluate(target, operand, operation, attempt):
             target.modifiers.remove(m)
 
 
+def _united(target):
+    """New mesh: ``target`` with intersecting shells united (EXACT, self-intersection).
+
+    The exact solver only resolves self-intersections together with an operand,
+    so a tiny cube far outside the target is the operand and its shell is
+    deleted again from the result.
+    """
+    xs = [c[0] for c in target.bound_box]
+    size = max(max(xs) - min(xs), 1e-3)
+    far = max(xs) + 10.0 * size
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=size * 0.01)
+    bmesh.ops.translate(bm, verts=bm.verts, vec=(far, 0.0, 0.0))
+    op_mesh = bpy.data.meshes.new(OPERAND_NAME)
+    bm.to_mesh(op_mesh)
+    bm.free()
+    operand = bpy.data.objects.new(OPERAND_NAME, op_mesh)
+    try:
+        mesh = _evaluate(target, operand, 'UNION', EXACT_SELF)
+    finally:
+        bpy.data.objects.remove(operand)
+        bpy.data.meshes.remove(op_mesh)
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.x > far - size], context='VERTS')
+    bm.to_mesh(mesh)
+    bm.free()
+    return mesh
+
+
+def united_volume(target):
+    """Volume of ``target`` with intersecting shells united (counts overlaps once), or None."""
+    mesh = _united(target)
+    try:
+        volume, manifold, faces = mesh_volume_manifold(mesh)
+    finally:
+        bpy.data.meshes.remove(mesh)
+    return volume if manifold and faces else None
+
+
+def unite_bm(bm, name=TARGET_NAME):
+    """Copy of ``bm`` with intersecting shells united: (bmesh, "") or (None, reason). Caller frees."""
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    try:
+        before = meshlib.bm_volume(bm)
+        united = _united(obj)
+        try:
+            after, manifold, faces = mesh_volume_manifold(united)
+            if not faces or not manifold or after > before * (1.0 + VOLUME_TOLERANCE) + 1e-9:
+                return None, f"uniting the shells failed (manifold={manifold}, volume {before:.6g} -> {after:.6g})"
+            out = bmesh.new()
+            out.from_mesh(united)
+            return out, ""
+        finally:
+            bpy.data.meshes.remove(united)
+    finally:
+        _drop(obj)
+        bpy.data.meshes.remove(mesh)
+
+
+def _drop(obj):
+    """Remove a temporary object linked to the scene collection and resync the view layer
+    (otherwise ``view_layer.objects`` yields None for it until the next update)."""
+    collection = bpy.context.scene.collection
+    if obj.name in collection.objects:
+        collection.objects.unlink(obj)
+    bpy.data.objects.remove(obj)
+    bpy.context.view_layer.update()
+
+
+VOLUME_REASONS = ("did not grow", "did not shrink", "more than the operand", "more volume than", "larger than")
+
+
 def apply(target, operand_bm, operation, quality='AUTO', self_intersect=False, expect=None, voxel=True,
           order=None):
     """Apply UNION/DIFFERENCE/INTERSECT of ``operand_bm`` (target object space) to ``target``.
@@ -191,6 +267,7 @@ def apply(target, operand_bm, operation, quality='AUTO', self_intersect=False, e
     operand_bm.to_mesh(op_mesh)
     operand = bpy.data.objects.new(OPERAND_NAME, op_mesh)
     attempts = []
+    merged = None
     try:
         if order is None:
             order = attempt_order(quality, self_intersect, voxel, len(target.data.polygons))
@@ -203,6 +280,13 @@ def apply(target, operand_bm, operation, quality='AUTO', self_intersect=False, e
                 bpy.data.meshes.remove(new_mesh)
                 raise
             reason = check_result(operation, before, operand_volume, after, manifold, faces, expect)
+            if (reason and self_intersect and attempt in (EXACT_SELF, VOXEL)
+                    and any(r in reason for r in VOLUME_REASONS)):
+                # These attempts unite intersecting shells: compare with the united target (the
+                # plain volume counts the overlap twice, defect D14). Computed once per call.
+                if merged is None:
+                    merged = united_volume(target) or before
+                reason = check_result(operation, merged, operand_volume, after, manifold, faces, expect)
             attempts.append((attempt, reason or "ok", round(time.perf_counter() - t0, 3)))
             if reason:
                 bpy.data.meshes.remove(new_mesh)
@@ -252,6 +336,6 @@ def apply_bm(target_bm, operand_bm, operation, quality='AUTO', self_intersect=Fa
     finally:
         # apply() replaced and removed ``mesh`` on success: only the object's mesh is left
         final = obj.data
-        bpy.data.objects.remove(obj)
+        _drop(obj)
         if final.users == 0:
             bpy.data.meshes.remove(final)

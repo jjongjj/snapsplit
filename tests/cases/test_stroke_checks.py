@@ -11,8 +11,9 @@
   places builds without the "bends into" warning (same exact side test in both, and
   Distribute keeps a safety margin on the own-seam check, whose measure is continuous); the ribbon side test
   agrees with the exact 2D test on all connector samples.
-- Raising the gap of a stroke cut until it cannot be built sets ``cut.problem`` (shown
-  in the panel); lowering it clears it.
+- Raising the gap of a stroke cut until it cannot be built shows the reason in the panel
+  (draw-time cached check, stack.stroke_problem_cached); lowering it clears it, and the
+  check follows unit-scale and object-scale changes without any edit of the cut.
 """
 
 import math
@@ -153,12 +154,16 @@ def run(ctx):
     lib.select_only([ui])
     add_stroke([(-26.0 + 52.0 * i / 39, 0.0, 6.0 * math.sin(4 * math.pi * i / 39)) for i in range(40)])
     cut = ui.splitforge_stack.cuts[0]
-    assert cut.problem == "", cut.problem
+    stack_api = ctx.module("model.stack")
+
+    def problem():
+        return stack_api.stroke_problem_cached(ui, ui.splitforge_stack.cuts[0], scene)
+    assert problem() == "", problem()
     cut.gap_mm = 0.5
-    assert cut.problem == "", cut.problem
+    assert problem() == "", problem()
     cut.gap_mm = 12.0
-    ctx.metric("gap_problem", cut.problem)
-    assert "gap" in cut.problem, cut.problem
+    ctx.metric("gap_problem", problem())
+    assert "gap" in problem(), problem()
     labels = []
 
     class Layout:
@@ -182,7 +187,18 @@ def run(ctx):
         "label": lambda self, text="", icon='NONE': with_icon.append(icon)})(), None, cut, 0, None, "", 0)
     assert 'ERROR' in with_icon, with_icon
     cut.gap_mm = 0.5
-    assert cut.problem == "", cut.problem
+    assert problem() == "", problem()
+    # Stays current without any edit of the cut: unit scale (gap 0.5 mm becomes 12.5 BU) and object scale
+    scene.unit_settings.scale_length = 0.00004
+    assert "gap" in problem(), problem()
+    lib.set_scene_mm()
+    assert problem() == ""
+    ui.scale = (0.08, 1.0, 0.08)
+    bpy.context.view_layer.update()
+    assert problem() != "", "shrunk object: the 6 mm waves become too tight for the 0.5 mm gap"
+    ui.scale = (1.0, 1.0, 1.0)
+    bpy.context.view_layer.update()
+    assert problem() == ""
     try:
         bpy.ops.splitforge.build()
     except RuntimeError as ex:

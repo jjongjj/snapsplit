@@ -14,7 +14,7 @@ from mathutils import Vector
 from ..core import meshlib, naming
 from ..cuts import plane, stroke
 
-CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "problem", "distribution",
+CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "distribution",
               "connector_count", "connector_rows", "margin_pct")
 CONNECTOR_FIELDS = ("enabled", "kind", "u", "v", "rotation_deg", "width_mm", "height_mm", "length_mm",
                     "pin_side", "clearance_mm")
@@ -95,7 +95,6 @@ def set_stroke(cut, points, direction):
     cut.origin = co
     cut.normal = n
     cut.tangent = t
-    cut.problem = stroke_problem(cut.id_data, cut, bpy.context.scene)
 
 
 def stroke_problem(obj, cut, scene):
@@ -110,6 +109,27 @@ def stroke_problem(obj, cut, scene):
     except stroke.StrokeError as ex:
         return str(ex)
     return ""
+
+
+# (object name, cut uid) -> (inputs, message): the panel asks on every redraw; the stroke check
+# only runs again when something it depends on changed (points, direction, gap, the object's
+# transform and bounds, the unit scale). Plain Python values only.
+_PROBLEMS = {}
+
+
+def stroke_problem_cached(obj, cut, scene):
+    """stroke_problem() for drawing code: recomputed only when its inputs changed."""
+    inputs = (tuple(round(x, 9) for row in obj.matrix_world for x in row),
+              tuple(round(x, 9) for c in obj.bound_box for x in c),
+              round(scene.unit_settings.scale_length, 12), round(cut.gap_mm, 9), tuple(cut.direction),
+              len(cut.points), hash(tuple(tuple(p.co) for p in cut.points)))
+    key = (obj.name, cut.uid)
+    hit = _PROBLEMS.get(key)
+    if hit is None or hit[0] != inputs:
+        if len(_PROBLEMS) > 256:
+            _PROBLEMS.clear()
+        hit = _PROBLEMS[key] = (inputs, stroke_problem(obj, cut, scene))
+    return hit[1]
 
 
 def stroke_points(cut):

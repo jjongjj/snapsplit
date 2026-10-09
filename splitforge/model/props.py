@@ -53,14 +53,6 @@ def _redraw(_self, context):
             area.tag_redraw()
 
 
-def _gap_changed(self, context):
-    """A stroke cut may become invalid with a larger gap: re-check and keep the message for the panel."""
-    _redraw(self, context)
-    if self.kind == 'STROKE':
-        from . import stack
-        self.problem = stack.stroke_problem(self.id_data, self, context.scene)
-
-
 def _material_changed(self, context):
     self.clearance_mm = MATERIAL_PROFILES.get(self.material, self.clearance_mm)
 
@@ -120,8 +112,7 @@ class SPLITFORGE_PG_Cut(PropertyGroup):
                                  update=_redraw,
                                  description="Seam frame U axis (projected into the plane)")
     gap_mm: FloatProperty(name="Gap (mm)", default=0.0, min=0.0, soft_max=5.0, precision=2,
-                          update=_gap_changed, description="Material removed along the cut (kerf)")
-    problem: StringProperty(name="Problem", description="Why this stroke cut cannot be built (empty if it can)")
+                          update=_redraw, description="Material removed along the cut (kerf)")
     cap: BoolProperty(name="Cap", default=True, description="Close the cut faces")
     connectors: CollectionProperty(type=SPLITFORGE_PG_Connector)
     active_connector: IntProperty(name="Active connector", default=0, min=0)
