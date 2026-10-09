@@ -15,7 +15,7 @@ message and changes nothing; Easy stroke (gap + connectors) builds in one call.
 import math
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 import lib
@@ -107,6 +107,33 @@ def run(ctx):
     cut_bools = [entry for entry in result.booleans if entry[0].startswith(cut.name)]
     assert len(cut_bools) == 2 and all(entry[1] for entry in cut_bools), result.booleans
     ctx.metric("s_solvers", ",".join(entry[1] for entry in cut_bools))
+
+    # --- pair check: a plausible single result whose pair loses volume is redone -----------
+    boolean = ctx.module("core.boolean")
+    original = boolean._evaluate
+
+    def lossy(target, operand, operation, attempt):
+        """The first EXACT side result shrunk by 10 %: still manifold and smaller (passes the
+        single-boolean check), but A + B no longer adds up to the piece."""
+        mesh = original(target, operand, operation, attempt)
+        if attempt == 'EXACT' and target.name.startswith("_SplitForge_Target") and not lossy.done:
+            lossy.done = True
+            mesh.transform(Matrix.Scale(0.9, 4))
+        return mesh
+    lossy.done = False
+    lib.select_only([cube])
+    cube.hide_set(False)
+    boolean._evaluate = lossy
+    try:
+        retried = build.build(bpy.context, cube)
+    finally:
+        boolean._evaluate = original
+    side = [entry for entry in retried.booleans if entry[0].startswith(cut.name)]
+    ctx.metric("pair_retry", "; ".join(f"{label}={solver}" for label, solver, _a in side))
+    assert lossy.done and len(side) == 4, side             # A, B, then both redone
+    assert side[2][1] != 'EXACT' and side[3][1] != 'EXACT', side
+    total = sum(lib.volume(bpy.data.objects[n]) for n in retried.parts)
+    lib.assert_close(total, 64000.0 - gap_volume, rel=0.01, msg="volume after the pair retry")
 
     # --- disable / rebuild / remove: no leftovers --------------------------------------
     n_objects, n_meshes = len(bpy.data.objects), len(bpy.data.meshes)

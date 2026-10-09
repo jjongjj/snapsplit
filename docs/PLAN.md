@@ -201,19 +201,30 @@ class SNAP_PG_CutStack(PropertyGroup):
 | 검증/출력 | `snapsplit.validate`, `snapsplit.fix_transforms`, `snapsplit.fix_units`, `snapsplit.export_parts` (STL/OBJ/FBX, 파트별 파일) | |
 | 레거시 | 기존 `planar_split`, `add_connectors`, `place_connectors_click`, `freehand_cut`, `align_faces`… | Phase 3까지 "Legacy" 서브패널에 유지 |
 
-### 4.4 불리언 파이프라인 (`core/boolean.py`)
+### 4.4 불리언 파이프라인 (`core/boolean.py`) — Phase 2 구현
 
 ```
-run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
-  1. 입력 전처리: 스케일/회전 적용(복사본), remove_doubles(1e-5 mm), normals outside
-  2. PLANE 컷: bmesh.bisect_plane 2회(±gap/2) + cap  ← 불리언 없이 가장 견고·빠름
-  3. 그 외: Boolean 모디파이어(DIFFERENCE, solver=EXACT, use_self=False) → apply_modifier_data
-  4. 결과 검증: 면 수>0, 매니폴드, 부피 > 0, 부피 합 ≈ 원본 부피 − 갭 부피 (허용 5%)
-  5. 실패 시 폴백 순서: EXACT(use_hole_tolerant) → FAST → 입력 voxel remesh(복셀 = bbox 대각/400, 사용자 조정) 후 EXACT → 오류 보고(파트 미생성, 원본 무손상)
-  6. 각 단계는 progress.step()을 호출(대형 메시 피드백)
+apply(target_obj, operand_bm, op, preference, self_intersect, expect) -> BooleanResult(ok, solver, message, attempts)
+apply_bm(target_bm, operand_bm, op, ...) -> (BooleanResult, bmesh|None)     # 임시 오브젝트 경유, 항상 정리
+  시도 순서(AUTO/EXACT): EXACT → EXACT_SELF(use_self) → MANIFOLD(4.5+) → FAST/FLOAT → VOXEL(리메시 대각/200 후 EXACT_SELF)
+                FAST: float → EXACT → EXACT_SELF → MANIFOLD → VOXEL;  self_intersect=True면 EXACT 생략
+  검증: 면>0, 매니폴드, 부피: UNION before<after≤before+operand, DIFFERENCE before-operand≤after<before,
+        INTERSECT after≤min(before, operand), 호출자 expect 범위
+  전부 실패: 대상 불변, 시도별 이유를 담은 메시지(경고). 폴백 시 로그 "fallback=<solver> after ..."
 ```
 
-곡선 컷 커터(`cuts/stroke.py`): 스트로크 2D 점 → 뷰 레이를 따라 원본 bbox를 넘어 앞·뒤로 연장한 **리본(ruled surface)** → 리본을 법선 방향으로 `gap_mm`만큼 두께 부여 + 측면으로 bbox 밖까지 연장한 폐솔리드 `H_gap` → `H+` = 리본 한쪽 반공간 솔리드. A = 원본 − H+, B = 원본 − (H+ 의 여집합 + H_gap) 로 두 파트를 각각 **한 번의 DIFFERENCE**로 생성한다. 폴리라인/폴리곤 커터도 같은 "솔리드 커터 → 2회 DIFFERENCE" 규약을 따르므로 파이프라인은 하나다.
+- 평면 컷은 불리언 없이 bisect + 캡(가장 견고·빠름) 유지.
+- 곡선 컷(`cuts/build.py`): 리본이 닿는 조각마다 `remove_for_a` / `remove_for_b`로 DIFFERENCE 2회, 결과 쌍이 부피 보존(A + B + 갭 부피 = 조각 ± 4 %)을
+  만족하지 않으면 사용한 솔버 다음부터 둘 다 다시. 리본이 닿지 않는 조각은 통째로 자기 쪽.
+- 소스 셸끼리 교차(구멍 메운 Suzanne의 눈↔머리)하면 모든 불리언을 EXACT_SELF부터 시작(EXACT는 이런 입력에서 빈 결과).
+- 진행률: Build는 단계 생성기(`build_steps`), 모달 Build가 타이머로 한 단계씩 실행(`core/progress.py`: 커서 진행률 + 상태바).
+
+곡선 컷 커터(`cuts/stroke.py`, 2026-10-09 결정: 뷰 투영 리본): 스트로크(월드 폴리라인 + 압출 방향 d, 레코드에는 오브젝트 로컬로 저장)를
+d에 수직인 평면의 2D 곡선으로 보고, 끝 방향으로 직선 연장해 오브젝트(+스트로크)를 둘러싼 사각형 R(여유 = 대각 10 % + 2×갭)에 닿게 한다.
+한쪽 영역 = 곡선 + R 경계를 그쪽으로 도는 다각형, 깊이는 오브젝트 bbox를 넘는 프리즘. 갭은 곡선을 ±갭/2 오프셋한 두 곡선:
+A = 조각 − 오른쪽(곡선+갭/2), B = 조각 − 왼쪽(곡선−갭/2). 자기교차, 연장선이 스트로크와 교차, 갭보다 급한 굽힘(오프셋 역행),
+갭보다 가까이 되돌아옴(+오프셋이 −오프셋의 왼쪽에 있지 않음)은 메시지와 함께 거부. 커넥터 프레임: u = 호 길이(중앙 0), v = d 방향 깊이,
+핀 축 = t × d. 리본 BVH는 깊이 방향으로 잘게 나눈다(1:100 가는 삼각형에서 BVH 최근접 오차 ~0.01 mm, float32).
 
 양면 도웰: 두 파트 모두 소켓 DIFFERENCE, 도웰 본체는 별도 파트 오브젝트(공차는 소켓에 적용)로 결과 컬렉션에 포함.
 
@@ -260,7 +271,7 @@ run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
 
 | 리스크 | 영향 | 대응 |
 |---|---|---|
-| EXACT 불리언이 얇은 벽/자기교차 메시에서 실패·느림 | 곡선 컷 실패 | voxel remesh 폴백, 부피 검증, 평면 컷은 bisect 유지 |
+| EXACT 불리언이 얇은 벽/자기교차 메시에서 실패·느림 | 곡선 컷 실패 | 폴백 체인(EXACT_SELF, MANIFOLD, float, voxel) + 부피/쌍 검증(Phase 2 구현), 평면 컷은 bisect 유지. 자기교차 대형 메시는 EXACT_SELF가 느림(7번 결정) |
 | 스트로크 리본 커터가 자기교차(급한 곡선·뷰 방향) | 비매니폴드 커터 | 스트로크 리샘플·스무딩, 커터 자체 매니폴드 검사 후 거부 메시지 |
 | Blender 5.x API 변화(재질, `use_nodes`, 모디파이어 apply, gpu 셰이더) | 로드 실패 | `core/compat.py` 집중, 4.5+5.2 자동 테스트 상시 실행, 4.2는 CI 없이 수동 |
 | 업스트림 freehand 브랜치 리베이스/변경 | 머지 충돌 | 새 모듈 격리(strangler), 동기화 주기 짧게 |
@@ -275,5 +286,6 @@ run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
 2. ~~제품 식별자~~ → **결정됨**: `id="splitforge"`, 이름 "SplitForge"(임시, `core/naming.py`로 중앙화). 문서 상단 참고.
 3. 최소 지원 버전: manifest 4.2 유지하되 자동 검증은 4.4/4.5/5.2만 할지, 4.2 LTS를 설치해 검증 대상에 넣을지.
 4. ~~레거시 공개 유지 기간~~ → **결정됨**: Phase 3까지 유지, 새 메인 패널 아래 접힌 "Legacy" 서브패널.
-5. 곡선 컷 방식: 뷰 투영 리본(제안, 스트로크 1회) vs 표면 투영 경로 + 법선 오프셋(표면을 따라가지만 구현 난도↑). Phase 2 착수 전 확정.
+5. ~~곡선 컷 방식~~ → **결정됨(2026-10-09)**: 뷰 투영 리본(그린 스트로크를 뷰 방향으로 압출, 레코드는 뷰와 무관한 로컬 폴리라인 + 방향). 4.4절.
 6. 양면 도웰의 도웰 본체를 결과 컬렉션에 "출력용 파트"로 포함할지, 규격 시판 도웰(예: Ø3mm 핀) 가정으로 소켓만 만들지.
+7. (Phase 2 열린 결정) 큰 자기교차 메시에서 EXACT_SELF가 느림: 51만 면 Suzanne 평면 Build의 커넥터 불리언이 이전 MANIFOLD 폴백(~10 s) 대신 EXACT_SELF(~62 s). 큰 메시(예: >200k 면)에서 MANIFOLD를 EXACT_SELF보다 먼저 시도할지(결과: 겹친 셸을 합치지 않고 그대로 둠).

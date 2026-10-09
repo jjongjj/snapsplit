@@ -45,7 +45,9 @@ def struct_refs(op):
     bad = []
     for key, value in vars(op).items():
         for v in (value if isinstance(value, (list, tuple)) else [value]):
-            if isinstance(v, bpy.types.bpy_struct) and not isinstance(v, bpy.types.ID):
+            # real non-ID structs, and the stand-ins this test passes for Area/Region/RegionView3D
+            if ((isinstance(v, bpy.types.bpy_struct) and not isinstance(v, bpy.types.ID))
+                    or isinstance(v, (FakeArea, lib.FakeRegion, lib.FakeView))):
                 bad.append((key, type(v).__name__))
     return bad
 

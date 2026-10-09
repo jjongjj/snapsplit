@@ -175,6 +175,30 @@ def run(ctx):
     assert len(parts) == 4 and all(lib.is_manifold(p) for p in parts)
     no_interpenetration(fit, parts)
 
+    # Slanted ribbon (drawn looking along (0.8, 0, -0.6)): the Z-cut pins run along Z, so a
+    # position inset in 2D from where the ribbon meets the seam can still reach across the
+    # ribbon higher up; only the 3D barrier check of Distribute catches that
+    tilt = lib.make_cube(40.0)
+    tilt.name = "Tilt"
+    lib.select_only([tilt])
+    lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='Z')
+    d = Vector((0.8, 0.0, -0.6))
+    lib.run_op(bpy.ops.splitforge.stack_add_stroke, direction=d,
+               points=[{"name": "", "co": tuple(Vector((0.0, -26.0 + 52.0 * i / 19, 0.0)) + d * 0.0
+                                                + Vector((0.6, 0.0, 0.8)) * (1.5 * math.sin(i / 3.0)))}
+                       for i in range(20)])
+    tz = tilt.splitforge_stack.cuts[0]
+    tz.connector_count, tz.margin_pct = 3, 0.0
+    res = auto.add_auto(bpy.context, tilt, tz, 'CYL_PIN', 5.0, 5.0, 10.0)
+    ctx.metric("tilt", f"{res.added}/{res.moved}/{res.dropped} {res.describe()}")
+    tbar = build.fit_planes(tilt, list(tilt.splitforge_stack.cuts), scene)
+    tspec = build.cut_specs(tilt, [tz], scene)[0]
+    for c in tz.connectors:
+        cs = build.make_spec(tilt, tz, scene, "", c.u, c.v, 0.0, 'CYL_PIN', 5, 5, 10, 0.2, 'A', tspec)
+        margin = min(fit.plane_margin(cs, [tbar[tilt.splitforge_stack.cuts[1].uid]], side) for side in (True, False))
+        assert margin >= wall - 1e-6, (c.u, c.v, margin)
+    assert res.added >= 2 and res.moved + res.dropped > 0, res
+
     # A manual Z-cut connector straddling the stroke ribbon is skipped by Build
     m = zcut.connectors.add()
     m.u, m.v = 0.0, 0.0

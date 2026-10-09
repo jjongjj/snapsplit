@@ -12,6 +12,8 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 |---|---|
 | `p1_adjust_plane` | QA-5: 활성 컷 평면 gpu 오버레이가 보임(오버레이 끔 대비 주황 픽셀), `splitforge.cut_adjust_plane` 마우스 드래그로 평면이 법선 방향으로 이동, 휠 = 정확히 1 mm, 좌클릭 확정 후 **실제 Ctrl+Z / Ctrl+Shift+Z 키 이벤트**로 되돌리기·다시하기(오퍼레이터가 undo 단계 1개를 남김), X 키 축 정렬, Esc 복원, 모달 중 undo/redo 반복(크래시 회귀), 모달 중 파일 로드 → `cancel()` |
 | `p1_panel` | QA-6: 사이드바 SplitForge 탭을 클릭으로 열고, 버튼 위치를 hover 스캔(`ui.copy_python_command_button`/`copy_data_path_button`)으로 찾아 **실제 클릭**: X 컷 추가 → Ctrl+Z/Ctrl+Shift+Z, 목록 체크박스로 활성 토글, Remove, Distribute(커넥터), Build(4파트 매니폴드, 원본 숨김·불변), Export(파트당 STL), Clear Build. 스크린샷 `panel_start`·`panel_built` → `docs/qa/p1_panel_<ver>.png` |
+| `p2_stroke` | QA-7: 구멍 메운 Suzanne(눈 셸 포함) 정면 뷰에서 `splitforge.stack_add_stroke`를 실제 LMB 드래그로 S자 → 릴리스 후 스트로크·리본 프리뷰(비스듬한 뷰로 이동해도 유지, 따뜻한 픽셀 증가), Enter → STROKE 컷(방향 = 뷰 방향 +Y), 오버레이에 리본 면, **실제 Ctrl+Z/Ctrl+Shift+Z**, 모달 Build → 매니폴드 2파트 + "2 separate shell(s)" 정보(눈 통째로), 분리 표시 스크린샷, Esc/RMB 흔적 없음·핸들러 제거, Shift 릴리스 = 수평 직선(법선 Z), Redraw(같은 uid, 새 점), 그리는 중 파일 로드 → `cancel()` |
+| `p2_build_progress` | QA-8: 13만 면 Suzanne에 스트로크 + X 평면 + Distribute, 모달 Build 중간에 **창 전체 스크린샷**(상태바 "SplitForge Build: … (n/m)"), 진행 단계(A/B 쪽, 커넥터) 마지막 = 합계, 4파트 매니폴드; 재빌드 중간 Esc → 이전 파트·메시 그대로, "Build cancelled" |
 | `qa1_preview_color` | QA-1: 프리뷰 평면이 Solid 뷰에서 주황(스크린샷 픽셀: 프리뷰 끔 대비 따뜻한 색 픽셀 비율), 재질 `diffuse_color` 주황, 토글 반복 후 고아 메쉬 0, 끄면 평면·X-Ray 정리 |
 | `qa2_adjust` | QA-2: 마우스 드래그로 오프셋 변화 + 평면이 오프셋 위치로 이동, 좌클릭 확정(오프셋 유지·모달 종료), Enter 확정(프리뷰 끔 상태, 고아 메쉬 0), Esc 취소(메시지·평면·X-Ray 정리). 비스듬한 뷰(평면이 면으로 보이게), 두 번째 확정 메시지는 그 실행 이후 출력에서만 찾음 |
 | `qa3_connectors` | QA-3: 위에서 본 분할 큐브에서 프리뷰가 커서를 따라감(커서 광선∩시임 위치와 일치, 위치 변화), 좌클릭 시 커서 위치에 핀(핀 쪽 부피 +, 소켓 쪽 −, 돌출 정점이 목표 위치 근처), S 후 클릭은 반대 파트에 핀, 두 파트 매니폴드, 우클릭 취소 후 프리뷰·X-Ray 정리. 오버레이 켜고 촬영(와이어 프리뷰는 오버레이 엔진이 그림) |
@@ -52,6 +54,27 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 - 2단계에서 평면이 법선 방향으로 마우스를 따라 움직이고, 헤더에 `Cut offset +x.xx mm` 안내가 보인다. X/Y/Z는 현재 위치에서 법선을 해당 축으로 바꾼다.
 - 3단계 Ctrl+Z 한 번에 조정 전 평면으로, Ctrl+Shift+Z로 조정 후 평면으로 돌아간다.
 - 4단계 Esc 후 평면이 모달 시작 전 위치·방향으로 돌아오고 헤더 안내가 사라진다.
+
+## QA-7 곡선(스트로크) 컷 (`splitforge.stack_add_stroke`, P2-4 GUI)
+
+절차:
+1. 구멍 메운 Suzanne(눈 셸 그대로) 선택, 정면 뷰(Numpad 1). Draft 컷 목록 옆 곡선 아이콘(Add Stroke Cut)을 누른다.
+2. 좌클릭 드래그로 모델을 가로지르는 S자를 그리고 놓는다. 마우스 휠/중클릭으로 뷰를 돌려 리본을 확인한다. Enter.
+3. Ctrl+Z → Ctrl+Shift+Z. Build. 다시 Add Stroke Cut → 그린 뒤 Esc, 한 번 더 그린 뒤 Shift를 누른 채 놓고 Enter.
+4. 첫 스트로크 컷을 선택하고 "Redraw in Viewport"로 다시 그린 뒤 Enter. 자기 자신과 교차하는 고리를 그리고 Enter를 눌러 본다.
+
+기대 결과:
+- 2단계: 그리는 동안 주황 선, 놓으면 리본(오브젝트 깊이 앞뒤 선 + 끝 세로선)이 보이고 헤더에 "Enter: confirm cut". 확정 후 오버레이에 주황 반투명 리본 면.
+- 3단계: Ctrl+Z 한 번에 컷이 사라지고 Ctrl+Shift+Z로 돌아온다. Build는 진행률을 보이며 매니폴드 2파트, 정보 "2 separate shell(s) not crossed by any cut stay whole …"
+  (주둥이 아래 컷이면 눈은 통째로 위쪽 파트). Esc는 아무것도 남기지 않는다(헤더·선 사라짐). Shift 릴리스는 수평/수직 직선 컷.
+- 4단계: Redraw는 같은 컷(이름·커넥터 유지)의 모양만 바꾼다. 고리는 "The stroke crosses itself …" 경고와 함께 확정이 거부되고 다시 그릴 수 있다.
+
+## QA-8 대형 메시 Build 진행률 (P2-6 GUI)
+
+절차: Suzanne(Subdivision 4~5 적용) + 스트로크 컷 + 평면 컷 + Distribute, Build. 진행 중 Esc로 한 번 취소한 뒤 다시 Build.
+
+기대 결과: 진행 중 커서 진행률 숫자와 하단 상태바 "SplitForge Build: Stroke 1: side A (1/4)" 같은 텍스트가 갱신되고, UI가 단계 사이에 다시 그려진다.
+Esc는 진행 중인 불리언 단계가 끝난 뒤 멈추고 경고 "Build cancelled; the previous result is unchanged" — 이전 파트 그대로.
 
 ## QA-6 Draft 패널 → Build → Export (P1-12 GUI)
 
@@ -108,6 +131,7 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 ## QA-4 Freehand 스트로크 컷 (`snapsplit.freehand_cut`)
 
 절차:
+(레거시. 새 곡선 컷은 QA-7 — 별도 셸을 거부하지 않는다.)
 1. Suzanne(구멍 메운 것) 선택. **눈은 별도 셸이므로 지운다**(Edit Mode에서 눈 위에 커서 → L → X). Freehand Cut 단계 B3은
    컷이 지나가지 않는 별도 셸이 있으면 "The source contains unrelated or uncut separate surface shells" 오류로 확정을 거부한다
    (현행 제한). 정면 뷰(Numpad 1), 패널의 "Freehand Cut" 버튼을 누른다.
@@ -256,6 +280,8 @@ headless 적대 케이스(검증자 스크래치, 커밋 안 함): 컷 3개(Z + 
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| QA-7 곡선(스트로크) 컷 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p2-curved: `--gui` p2_stroke — 실제 LMB 드래그·Enter·Ctrl+Z/Ctrl+Shift+Z·모달 Build(눈 셸 정보)·Esc/RMB·Shift 스냅·Redraw·파일 로드. 사람 확인 남음: 리본 프리뷰 가독성, 원근 뷰에서 그린 감각(압출은 뷰 방향 하나, 원근 광선이 아님) [4.5](qa/p2_stroke_4.5.png) [5.2](qa/p2_stroke_5.2.png) |
+| QA-8 Build 진행률 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p2_build_progress — 13만 면, 빌드 중 상태바 텍스트 [5.2](qa/p2_build_progress_5.2.png), Esc 중간 취소 이전 결과 유지. 사람 확인 남음: 51만 면에서 불리언 한 단계(~30 s) 동안은 UI가 멈춤(단계 사이에만 갱신) |
 | QA-5 컷 평면 모달 조정 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p1-mvp2: `--gui` p1_adjust_plane — 오버레이 주황, 드래그·휠·X·LMB·Esc, 실제 Ctrl+Z/Ctrl+Shift+Z, 모달 중 undo/redo, 파일 로드 `cancel()`. 사람 확인 남음: 드래그 감도, 오버레이 가독성 [5.2](qa/p1_adjust_plane_5.2.png) |
 | QA-6 Draft 패널 → Build → Export | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p1_panel — 실제 버튼 클릭(추가·undo/redo·체크박스·삭제·Distribute·Build·Export·Clear). 사람 확인 남음: 패널 배치·문구 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png). 라이브 5.2(MCP)에서는 확인하지 않음(사용자 세션 미사용 규칙) |
 | D7 수정 라이브(MCP) | — | PASS | 2026-10-09 verifier, develop ff7ecdb: QA5_Steep 옛 커넥터 Rebuild → 다른 컷 넘는 3개 경고·건너뜀, 재배치 후 경고 0·관입 0·외곽 밖 0. 열린 항목 D8(중공 벽에 자동 배치 0개) — 위 "D7 수정 라이브 검증" 절 |

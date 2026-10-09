@@ -159,7 +159,7 @@ def run(ctx):
               + [Vector((5 + 0.8 * math.sin(a), 0, 2.2 + 0.8 * math.cos(a)))
                  for a in [math.pi * k / 12 for k in range(1, 12)]]
               + [Vector((5 - i, 0, 1.4)) for i in range(31)])
-    ctx.metric("msg_tight", rejected(u_turn, gap=2.0, text="gap"))
+    ctx.metric("msg_tight", rejected(u_turn, gap=2.0, text="bends too sharply"))
     stroke.build_cutter(u_turn, d, CORNERS, 0.2)  # fine with a small gap
     # Wide bend (radius 3 > offset 1) but the legs come back 1.5 apart: the offset curves do
     # not fold or cross, yet part A would overlap part B (plus not left of minus)
