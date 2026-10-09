@@ -5,7 +5,7 @@ schema_version = "1.0.0"
 # name: renaming means changing `id`/`name` here, the package folder name and the
 # constants in core/naming.py.
 id = "splitforge"
-version = "0.4.0"
+version = "0.4.1"
 name = "SplitForge"
 tagline = "Non-destructive cut stacks and connectors for 3D printing"
 # SplitForge fork maintainer; the upstream author is credited in `copyright` below
