@@ -35,12 +35,17 @@ the clearance; with a cut gap the sockets follow the pin as it sits after the ga
 
 **Dowels** are printed separately: both parts get a socket of half the dowel length plus the
 clearance, and Build adds one part `<object>_Dowel_<n>` per dowel (exact length and diameter,
-optional end chamfer) lying flat along X next to the object, resting on its lowest point. Lying
-flat puts the layer lines along the dowel, so the seam's shear load does not split it between
-layers. Dowel parts are exported with the other parts.
+optional end chamfer). Settings > **Dowel layout**: *Flat* (default) lies it along X next to the
+object, resting on its lowest point (layer lines along the dowel, so the seam's shear load does not
+split it between layers); *Upright* stands it on an end in the same row; *At assembly position*
+shows it in its sockets. Switching moves existing dowels; Export always writes them in a print pose
+(standing when Upright is chosen, otherwise lying flat).
 
 A custom mesh must be a closed manifold solid (not flat, at most 20,000 faces); otherwise Build
-skips that connector with a warning and Distribute / click placement refuse it with the reason.
+skips that connector with a warning and Distribute / click placement refuse it with the reason. Its
+socket keeps the clearance everywhere: slots and notches narrower than twice the clearance are
+filled, sharp corners rounded (Minkowski sum); if a very detailed mesh (over 4,000 triangles) cannot
+get that guarantee, Build says how much of the clearance it keeps.
 
 ### Legacy SnapSplit tools
 
@@ -53,8 +58,8 @@ not describe the current UI.
 
 ### Languages
 
-The UI (operator, property and panel labels) is translated to German and Korean
-(`splitforge/localization.py`); Blender's interface language applies it.
+The UI (operator, property and panel labels, labels with values) is translated to German and Korean,
+the tooltips to Korean (`splitforge/localization.py`); Blender's interface language applies it.
 
 ### Package structure
 

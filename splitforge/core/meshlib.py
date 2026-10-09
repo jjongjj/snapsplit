@@ -105,13 +105,16 @@ _WINDING_SKEW = (7.31e-4, 5.27e-4)
 
 
 class _Triangles:
-    """A triangulated copy of a bmesh with a BVH (its indices are the triangles') and, per triangle on
-    demand, its corners (coordinates and vertex indices). Call free() when done."""
+    """A triangle mesh (the bmesh itself, or a triangulated copy) with a BVH (its indices are the
+    triangles') and, per triangle on demand, its corners (coordinates and vertex indices). Call free()
+    when done."""
 
     def __init__(self, bm):
         from mathutils.bvhtree import BVHTree
-        self.bm = bm.copy()
-        if any(len(f.verts) != 3 for f in self.bm.faces):
+        # A triangle mesh is used as it is (no copy of a large mesh); otherwise a triangulated copy
+        self.owned = any(len(f.verts) != 3 for f in bm.faces)
+        self.bm = bm.copy() if self.owned else bm
+        if self.owned:
             self.bm.normal_update()   # n-gons are triangulated in their plane: normals must be current
             bmesh.ops.triangulate(self.bm, faces=self.bm.faces[:])
         self.bm.verts.index_update()
@@ -128,7 +131,8 @@ class _Triangles:
         return hit
 
     def free(self):
-        self.bm.free()
+        if self.owned:
+            self.bm.free()
 
 
 def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, tris=None):

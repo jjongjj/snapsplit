@@ -395,6 +395,7 @@ headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p3v/`, 커밋 안 �
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| P3 후속(D17·D18·도웰 배치) | PASS (자동) | PASS (자동) | 2026-10-10 fix/p3-followups: `--gui` p3_connector_types 도웰 배치 전환(조립·세움·눕힘) [조립](qa/p3f_dowel_assembled_5.2.png) [세움](qa/p3f_dowel_upright_5.2.png); D17·D18은 헤드리스. 사람 확인 남음: 한국어 툴팁 문구, 실제 출력 시 커스텀 소켓 끼움 |
 | Phase 3 커넥터 라이브(MCP) | — | PASS (결함 D17·D18) | 2026-10-10 verifier, develop f2a2f46: Z+S자 큐브에 8종(커스텀·도웰 2개 포함) Build 경고 0·매니폴드·조립 관입 0·여유 0.19–0.20(c 0.2), STL에 도웰 2개, 한국어 패널. `--gui` 6×2·헤드리스 38/38 ×2·`--slow` PASS, 뮤테이션 7/7. 위 "Phase 3 커넥터 라이브 검증" 절 |
 | QA-9 클릭 커넥터 배치 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p3-connectors: `--gui` p3_connector_click — 실제 클릭 3회·S·물체 밖 무시·실제 Ctrl+Z 3회 하나씩/Ctrl+Shift+Z 3회(모달 중과 끝난 뒤)·Build·파일 로드 `cancel()`. 사람 확인 남음: 프리뷰 가독성, 실제 마우스 감각 [프리뷰](qa/p3_click_preview_5.2.png) [배치](qa/p3_click_placed_5.2.png) [빌드](qa/p3_click_built_5.2.png) |
 | QA-10 커넥터 종류 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p3_connector_types — 8종 빌드(A, B, Dowel_1) [소켓](qa/p3_types_built_5.2.png) [핀](qa/p3_types_pins_5.2.png). 사람 확인 남음: 실제 출력 후 끼움 감각(공차·스냅 돌기 높이) |

@@ -273,6 +273,47 @@
   열린 결함: D17 좁은 오목 특징(< 2c) 커스텀 소켓 접힘 → MANIFOLD 폴백 0.05 mm 간섭·경고 없음, 날카로운 모서리 여유 감소(낮음~중간); D18 오퍼레이터 버튼 텍스트 5개
   Operator 컨텍스트 번역 없음(ko/de에서 영어, 낮음).
 
+### Phase 3 검증 후속 (fix/p3-followups, 검증자 결함 D17·D18 + 사용자 결정)
+
+- [x] **P3F-1 D17 커스텀 소켓 공차**: `connectors/custom_socket.py` — 정점 법선 오프셋이 깨끗이 합쳐지고 핀 표면 샘플(정점·모서리 점·면 중심)에서
+  ≥ 0.9 × 공차면 사용, 아니면 민코프스키 합(핀 ∪ 다각형 프리즘 ∪ 모서리 원기둥(8각, 내접 = c) ∪ 꼭짓점 이코스피어(내접 ≥ c)) 한 번 합집합(삼각형 ≤ 4000),
+  형상·크기·공차별 캐시. 모자라거나 너무 촘촘하면 Build 경고("keeps only N % of the clearance … simplify"). 함께 수정: bmesh에 바로 만든 솔리드는
+  법선이 없어 오목 n각형 캡(L·슬롯·별)이 홈을 가로질러 삼각분할됨 → 셸 합치기 실패·자기교차 처리로 폴백 → 삼각분할 전 `normal_update()`;
+  커스텀 핀은 자기교차할 때만 합침. 검증: `test_custom_socket.py` — 0.3 mm 슬롯·별·뾰족한 원뿔·L·상자: 경고 0, 매니폴드, 조립(갭 닫음) 공차
+  0.250 / 0.240 / 0.240 / 0.250 / 0.250(c 0.25; 평범한 오프셋만이면 −0.100 / 0.177 / 0.215), 핀 UNION 평범한 EXACT; 촘촘한 슬롯·별(삼각형 > 4000) 경고;
+  법선 없는 L은 자기교차 아님·합치기 성공. 검증자 적대 세트(L, 별, 슬롯, 원뿔 2, 토러스, 뒤집힌 L, 고밀도 UV, 미세, 두 셸, 분리) 관입 0·공차 ≥ 0.237.
+- [x] **P3F-2 D18 번역**: 자기 문구가 있는 오퍼레이터 버튼(Cut, Draw Cut, Redraw/Adjust in Viewport, Distribute, Click, Build, Rebuild)에
+  Operator 컨텍스트 항목(de/ko), 값이 든 라벨은 템플릿(`ui/panel.py tr()`: "Part of {name}", "Gap {gap} mm, {n} connector(s)", "On {name}",
+  "Stroke: {n} points", "1 unit = {mm} mm", "{n} part(s) in {collection}"). **툴팁은 한국어만**(사용자 결정, 104개). 검증: `test_i18n.py` — 버튼 문구
+  Operator 컨텍스트, 툴팁 104개 ko, `pgettext_tip`, 한국어 인터페이스로 패널을 그리면 값 라벨이 한국어("KoCube의 파트", "틈 0 mm, 커넥터 0개" 등).
+- [x] **P3F-3 도웰 배치 옵션**(사용자 결정): Settings > Dowel layout — Flat(기본)/Upright/At assembly position, 세 자세를 파트에 저장해
+  설정 변경 시 즉시 이동, Export는 출력 자세(Upright 선택 시 세움, 아니면 눕힘). 검증: `test_dowel.py`(세 자세 위치·크기·바닥, 조립 자세가 양 파트에서
+  공차만큼 떨어짐, 재빌드가 선택한 자세 사용, 자세별 STL 재임포트: 눕힘/세움/눕힘, 바닥 높이), GUI `p3_connector_types`(조립·세움·눕힘 이동, 스크린샷
+  [조립](qa/p3f_dowel_assembled_5.2.png) [세움](qa/p3f_dowel_upright_5.2.png)).
+- [x] **P3F-4 낮음 항목**: 클릭 모달은 수정키 없는 S/LMB만 처리(Ctrl/Cmd+S, Alt/Shift+LMB, Ctrl+Z는 통과; `test_connector_click`); 패널 커스텀 메시
+  검사가 Build처럼 평가된 메시(모디파이어) 사용, 키는 평가 메시 지문(`test_custom_connector`: Solidify 켜고/끄기); 핀 끝 모따기 전용 테스트
+  (`test_connector_edit`: 45° 단면 4점, 끝 높이 유지, 소켓은 모따기 없음); D16 얇은 셸 — 와인딩 적분을 X/Y/Z 세 방향(`test_unite_check`:
+  0.3 mm 판 누락은 Y·Z 광선 0.0 %, X 광선 0.87 %로 거부). 와인딩 적분 견고화: 살짝 기울인 광선, 모든 광선의 교차를 한 번에(광선 띠 BVH ∩ 메시 BVH →
+  정확한 광선-삼각형 교차; 겹친 조각의 일치하는 면도 각각 셈), 같은 교차의 중복은 꼭짓점을 공유하는 면일 때만.
+- [x] **P3F-5 결정 반영**: Align Faces 제거 유지, 슬라이딩 도브테일 레일 → 아래 백로그 B-1.
+
+결과(2026-10-10, fix/p3-followups): 헤드리스 39/39 PASS ×2(4.5.5/5.2.2), `--gui` 6시나리오 ×2 PASS(p3_connector_types에 도웰 배치 단계 추가; 마지막
+meshlib 미세 변경 후 p2_stroke·p2_build_progress·p3_connector_types ×2 재실행 PASS), `--slow test_perf_large`(5.2, 514 560면) PASS:
+평면 **Auto 14.54 s / Accurate 53.04 s**, 타입 **Auto 15.16 s / Accurate 49.88 s**, S자 **Auto 9.64 s / Accurate 46.02 s**(셸 합치기 검사가 3축이 되어
+Accurate +3–4 s; 삼각형 메시는 복사 없이 사용). 뮤테이션 15/15 검출(민코프스키 폴백 없음, 공차 검사 없음, 공차 경고 없음, 자기교차 검사·unite_bm의
+법선 갱신 제거(각각), Z축만, 중복 규칙에서 꼭짓점 공유 무시, Export가 조립 자세 유지, 설정이 도웰을 안 옮김, 패널이 평가 전 메시, 모따기 무시,
+Ctrl+S가 핀 쪽 전환, 값 라벨 미번역, ko 버튼 항목·툴팁 삭제).
+알려진 제한: 민코프스키 폴백은 느릴 수 있음(16각 원뿔 20–40 s, 형상·크기별 1회 캐시); 별·원뿔 소켓의 DIFFERENCE는 EXACT_SELF가 비매니폴드라
+MANIFOLD로 폴백(검증 통과, 조립 공차 0.24); 오류/경고 메시지 본문(보고)은 영어.
+
+### 백로그 (나중에, 사용자 결정 2026-10-10)
+
+- [ ] **B-1 슬라이딩 도브테일 레일**: 시임 평면 안에서 옆으로 밀어 넣는 도브테일(레거시 음수 테이퍼 + Span Axis/Hard-side Cut).
+  끝이 넓은 사다리꼴 단면 레일이 시임을 따라 한쪽(또는 양쪽) 외곽까지 열려 있고, 파트를 그 방향으로 밀어 조립. 필요한 것: 조립 방향
+  (시임 위 u 또는 v), 레일이 외곽을 지나도록 하는 fit 검사 예외(레일 축 방향만 외곽 통과 허용, 나머지 방향은 벽 0.4 mm), 레일과 다른 커넥터의
+  간섭(밀어 넣는 경로 위) 검사, 소켓은 경로 전체 + 공차. 검증 아이디어: 큐브 Z 컷 + X 방향 레일 → 매니폴드, 단면이 사다리꼴(끝 넓음),
+  B를 +X로 빼낼 수 있음(경로 위 관입 0), 경로를 막는 핀이 있으면 경고.
+
 ## Phase 4 — Manual/Polygonal 컷, 검증 강화, 패키징
 
 - [ ] **P4-1 폴리라인 컷** `cuts/polyline.py` + `stack_add_polyline`(뷰포트 클릭 점 → 리본 커터, 2-2와 동일 규약).
