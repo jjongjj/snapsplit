@@ -180,6 +180,8 @@ def run(ctx):
     assert abs(matrix_fn(0.0, 0.0, 0.0).translation.z - 14.0) < 1e-4, "connectors on the floor (20 - 6)"
     poly.depth_mm = 0.0
     assert overlay.polygon_prism(cube, poly, 1.0)[2] is None, "no floor, no connector frame"
+    log = _draw_all("polygon through")
+    assert ("label", "Polygon through the object: set a Depth for connectors on its floor") in log, log
     poly.depth_mm = 6.0
     fills, lines = overlay.geometry(bpy.context)
     assert len(fills) == 5, len(fills)

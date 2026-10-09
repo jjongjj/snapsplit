@@ -317,6 +317,8 @@ class SPLITFORGE_PT_connectors(_Base, Panel):
         cut = stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
         s = getattr(context.scene, naming.SCENE_SETTINGS)
         layout.label(text=tr("On {name}", name=cut.name), translate=False)
+        if cut.kind == 'POLYGON' and cut.depth_mm <= 0.0:
+            layout.label(text="Polygon through the object: set a Depth for connectors on its floor", icon='INFO')
 
         box = layout.box()
         box.label(text="New connectors")

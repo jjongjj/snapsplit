@@ -214,6 +214,8 @@ DICTIONARY = {
         ("*", "Objects"): "Objekte",
         ("*", "Keep Units"): "Einheiten beibehalten",
         ("*", "Keep Size"): "Größe beibehalten",
+        ("*", "Polygon through the object: set a Depth for connectors on its floor"):
+            "Polygon durch das ganze Objekt: Tiefe setzen für Verbinder auf seinem Boden",
     },
     "fr_FR": {
         ("*", "Auto"): "Auto",
@@ -608,6 +610,8 @@ DICTIONARY = {
         ("*", "Objects"): "오브젝트",
         ("*", "Keep Units"): "단위 유지",
         ("*", "Keep Size"): "크기 유지",
+        ("*", "Polygon through the object: set a Depth for connectors on its floor"):
+            "오브젝트를 관통하는 폴리곤: 바닥에 커넥터를 두려면 깊이를 설정하세요",
         # Phase 4 tooltips
         ("*", "Apply the object's rotation and scale to its mesh; the cuts move with it, so they stay in place"):
             "오브젝트의 회전과 스케일을 메시에 적용합니다. 컷도 함께 옮겨지므로 제자리에 남습니다",
