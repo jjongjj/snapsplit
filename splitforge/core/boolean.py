@@ -9,7 +9,8 @@ through a Boolean modifier that is evaluated and removed again; ``apply_bm``
 does the same for a bmesh target (through a temporary object). The operand
 becomes a temporary object that is never linked to a scene.
 
-Attempts (``attempt_order``), each verified by ``check_result``:
+Attempts (``attempt_order``, order set by the quality setting AUTO / ACCURATE /
+FAST, see there), each verified by ``check_result``; the accurate chain is:
 
 1. EXACT
 2. EXACT with self-intersection handling. Needed when the target (or the
@@ -48,6 +49,9 @@ VOXEL = 'VOXEL'
 # 40 mm cube; finer remeshes made the exact boolean after them take minutes)
 VOXEL_DIVISIONS = 200
 
+# Auto quality: targets with more faces than this try MANIFOLD first
+LARGE_FACES = 200_000
+
 # Relative volume tolerance of the checks (float noise of the solvers)
 VOLUME_TOLERANCE = 1e-6
 
@@ -65,19 +69,29 @@ class BooleanResult:
         return self.ok and len(self.attempts) > 1
 
 
-def attempt_order(preference='AUTO', self_intersect=False, voxel=True):
-    """Attempt names in order for ``preference`` in {'AUTO', 'EXACT', 'FAST'}.
+def attempt_order(quality='AUTO', self_intersect=False, voxel=True, faces=0):
+    """Attempt names in order for a quality setting (Scene setting ``boolean_quality``).
+
+    - ACCURATE: EXACT, EXACT_SELF, MANIFOLD, float, VOXEL. The exact solver with
+      self-intersection unites intersecting shells (a filled Suzanne's eyes and head).
+    - FAST: MANIFOLD first, then the accurate chain. MANIFOLD is much faster on
+      large meshes (0.5 s vs 29 s on 514k faces) but leaves intersecting shells
+      overlapping (each shell is cut on its own; slicers unite them).
+    - AUTO: FAST for targets with more than LARGE_FACES faces, ACCURATE below.
 
     ``self_intersect``: the inputs are known to intersect themselves, so plain
-    EXACT is skipped.
+    EXACT is skipped. Every attempt is validated (check_result) whatever the
+    order. Without MANIFOLD (Blender < 4.5) FAST equals ACCURATE.
     """
-    fast = compat.float_solver()
+    quality = {'EXACT': 'ACCURATE'}.get(quality, quality)
+    if quality == 'AUTO':
+        quality = 'FAST' if faces > LARGE_FACES else 'ACCURATE'
     exact = [EXACT_SELF] if self_intersect else [EXACT, EXACT_SELF]
     manifold = [MANIFOLD] if MANIFOLD in compat.boolean_solvers() else []
-    if preference == 'FAST':
-        order = [fast] + exact + manifold
+    if quality == 'FAST':
+        order = manifold + exact + [compat.float_solver()]
     else:
-        order = exact + manifold + [fast]
+        order = exact + manifold + [compat.float_solver()]
     if voxel:
         order.append(VOXEL)
     return order
@@ -158,7 +172,7 @@ def _evaluate(target, operand, operation, attempt):
             target.modifiers.remove(m)
 
 
-def apply(target, operand_bm, operation, preference='AUTO', self_intersect=False, expect=None, voxel=True,
+def apply(target, operand_bm, operation, quality='AUTO', self_intersect=False, expect=None, voxel=True,
           order=None):
     """Apply UNION/DIFFERENCE/INTERSECT of ``operand_bm`` (target object space) to ``target``.
 
@@ -166,7 +180,7 @@ def apply(target, operand_bm, operation, preference='AUTO', self_intersect=False
     evaluated). ``self_intersect``: the inputs are known to intersect
     themselves (plain EXACT is skipped). ``expect``: optional (lo, hi) range of
     the result volume. ``order``: explicit attempt list (default
-    ``attempt_order(preference, self_intersect, voxel)``). Returns a
+    ``attempt_order(quality, self_intersect, voxel, target face count)``). Returns a
     BooleanResult; on failure the target mesh is unchanged.
     """
     if not operand_bm.faces:
@@ -178,7 +192,9 @@ def apply(target, operand_bm, operation, preference='AUTO', self_intersect=False
     operand = bpy.data.objects.new(OPERAND_NAME, op_mesh)
     attempts = []
     try:
-        for attempt in (order if order is not None else attempt_order(preference, self_intersect, voxel)):
+        if order is None:
+            order = attempt_order(quality, self_intersect, voxel, len(target.data.polygons))
+        for attempt in order:
             t0 = time.perf_counter()
             new_mesh = _evaluate(target, operand, operation, attempt)
             try:
@@ -214,7 +230,7 @@ def apply(target, operand_bm, operation, preference='AUTO', self_intersect=False
     return BooleanResult(False, "", msg, attempts)
 
 
-def apply_bm(target_bm, operand_bm, operation, preference='AUTO', self_intersect=False, expect=None,
+def apply_bm(target_bm, operand_bm, operation, quality='AUTO', self_intersect=False, expect=None,
              name=TARGET_NAME, order=None):
     """``apply`` on a bmesh target (same space as the operand).
 
@@ -227,7 +243,7 @@ def apply_bm(target_bm, operand_bm, operation, preference='AUTO', self_intersect
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.scene.collection.objects.link(obj)
     try:
-        result = apply(obj, operand_bm, operation, preference, self_intersect, expect, order=order)
+        result = apply(obj, operand_bm, operation, quality, self_intersect, expect, order=order)
         out = None
         if result.ok:
             out = bmesh.new()

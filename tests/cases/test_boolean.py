@@ -62,12 +62,18 @@ def _run(ctx):
     fast = compat.float_solver()
     has_manifold = 'MANIFOLD' in compat.boolean_solvers()
 
-    # --- attempt order -----------------------------------------------------------------
-    auto = boolean.attempt_order('AUTO')
-    expected = ['EXACT', 'EXACT_SELF'] + (['MANIFOLD'] if has_manifold else []) + [fast, 'VOXEL']
-    assert auto == expected, auto
-    assert boolean.attempt_order('AUTO', self_intersect=True)[0] == 'EXACT_SELF'
-    assert boolean.attempt_order('FAST')[0] == fast and boolean.attempt_order('FAST')[-1] == 'VOXEL'
+    # --- attempt order by quality ------------------------------------------------------
+    accurate = ['EXACT', 'EXACT_SELF'] + (['MANIFOLD'] if has_manifold else []) + [fast, 'VOXEL']
+    assert boolean.attempt_order('ACCURATE') == accurate, boolean.attempt_order('ACCURATE')
+    assert boolean.attempt_order('EXACT') == accurate          # old name
+    assert boolean.attempt_order('AUTO', faces=1000) == accurate
+    big = boolean.LARGE_FACES + 1
+    fast_order = (['MANIFOLD'] if has_manifold else []) + ['EXACT', 'EXACT_SELF', fast, 'VOXEL']
+    assert boolean.attempt_order('AUTO', faces=big) == fast_order, boolean.attempt_order('AUTO', faces=big)
+    assert boolean.attempt_order('FAST', faces=10) == fast_order
+    assert boolean.attempt_order('ACCURATE', self_intersect=True)[0] == 'EXACT_SELF'
+    assert boolean.attempt_order('FAST', self_intersect=True) == fast_order[:1] + ['EXACT_SELF', fast, 'VOXEL'] \
+        if has_manifold else True
     assert 'VOXEL' not in boolean.attempt_order('AUTO', voxel=False)
 
     # --- result checks -------------------------------------------------------------------

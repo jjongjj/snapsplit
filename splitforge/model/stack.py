@@ -14,7 +14,7 @@ from mathutils import Vector
 from ..core import meshlib, naming
 from ..cuts import plane, stroke
 
-CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "distribution",
+CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "problem", "distribution",
               "connector_count", "connector_rows", "margin_pct")
 CONNECTOR_FIELDS = ("enabled", "kind", "u", "v", "rotation_deg", "width_mm", "height_mm", "length_mm",
                     "pin_side", "clearance_mm")
@@ -95,6 +95,21 @@ def set_stroke(cut, points, direction):
     cut.origin = co
     cut.normal = n
     cut.tangent = t
+    cut.problem = stroke_problem(cut.id_data, cut, bpy.context.scene)
+
+
+def stroke_problem(obj, cut, scene):
+    """'' if the stroke cut can be built with its gap on ``obj``, else the reason (StrokeError text)."""
+    from ..core import units
+    m = obj.matrix_world
+    points = [m @ p for p in stroke_points(cut)]
+    d = (m.to_3x3() @ Vector(cut.direction)).normalized()
+    corners = [m @ Vector(c) for c in obj.bound_box]
+    try:
+        stroke.build_cutter(points, d, corners, units.mm_to_scene(cut.gap_mm, scene))
+    except stroke.StrokeError as ex:
+        return str(ex)
+    return ""
 
 
 def stroke_points(cut):

@@ -206,15 +206,17 @@ class SNAP_PG_CutStack(PropertyGroup):
 ```
 apply(target_obj, operand_bm, op, preference, self_intersect, expect) -> BooleanResult(ok, solver, message, attempts)
 apply_bm(target_bm, operand_bm, op, ...) -> (BooleanResult, bmesh|None)     # 임시 오브젝트 경유, 항상 정리
-  시도 순서(AUTO/EXACT): EXACT → EXACT_SELF(use_self) → MANIFOLD(4.5+) → FAST/FLOAT → VOXEL(리메시 대각/200 후 EXACT_SELF)
-                FAST: float → EXACT → EXACT_SELF → MANIFOLD → VOXEL;  self_intersect=True면 EXACT 생략
+  시도 순서(품질 설정, 7번 결정): ACCURATE: EXACT → EXACT_SELF(use_self) → MANIFOLD(4.5+) → FAST/FLOAT → VOXEL(리메시 대각/200 후 EXACT_SELF)
+                FAST: MANIFOLD → EXACT → EXACT_SELF → float → VOXEL;  AUTO: 대상 면 > 200k면 FAST, 아니면 ACCURATE
+                self_intersect=True면 EXACT 생략
   검증: 면>0, 매니폴드, 부피: UNION before<after≤before+operand, DIFFERENCE before-operand≤after<before,
         INTERSECT after≤min(before, operand), 호출자 expect 범위
   전부 실패: 대상 불변, 시도별 이유를 담은 메시지(경고). 폴백 시 로그 "fallback=<solver> after ..."
 ```
 
 - 평면 컷은 불리언 없이 bisect + 캡(가장 견고·빠름) 유지.
-- 곡선 컷(`cuts/build.py`): 리본이 닿는 조각마다 `remove_for_a` / `remove_for_b`로 DIFFERENCE 2회, 결과 쌍이 부피 보존(A + B + 갭 부피 = 조각 ± 4 %)을
+- 곡선 컷(`cuts/build.py`): 리본이 닿는 조각마다 `remove_for_a` / `remove_for_b`로 DIFFERENCE 2회, 결과 쌍이 부피 보존(A + B + 갭 부피 = 조각;
+  허용 0.1 % + 리본이 지나는 면의 삼각분할 여유(비평면 사각형) — 셸이 교차하거나 voxel 폴백일 때만 4 %, D9)을
   만족하지 않으면 사용한 솔버 다음부터 둘 다 다시. 리본이 닿지 않는 조각은 통째로 자기 쪽.
 - 소스 셸끼리 교차(구멍 메운 Suzanne의 눈↔머리)하면 모든 불리언을 EXACT_SELF부터 시작(EXACT는 이런 입력에서 빈 결과).
 - 진행률: Build는 단계 생성기(`build_steps`), 모달 Build가 타이머로 한 단계씩 실행(`core/progress.py`: 커서 진행률 + 상태바).
@@ -288,4 +290,8 @@ A = 조각 − 오른쪽(곡선+갭/2), B = 조각 − 왼쪽(곡선−갭/2). �
 4. ~~레거시 공개 유지 기간~~ → **결정됨**: Phase 3까지 유지, 새 메인 패널 아래 접힌 "Legacy" 서브패널.
 5. ~~곡선 컷 방식~~ → **결정됨(2026-10-09)**: 뷰 투영 리본(그린 스트로크를 뷰 방향으로 압출, 레코드는 뷰와 무관한 로컬 폴리라인 + 방향). 4.4절.
 6. 양면 도웰의 도웰 본체를 결과 컬렉션에 "출력용 파트"로 포함할지, 규격 시판 도웰(예: Ø3mm 핀) 가정으로 소켓만 만들지.
-7. (Phase 2 열린 결정) 큰 자기교차 메시에서 EXACT_SELF가 느림: 51만 면 Suzanne 평면 Build의 커넥터 불리언이 이전 MANIFOLD 폴백(~10 s) 대신 EXACT_SELF(~62 s). 큰 메시(예: >200k 면)에서 MANIFOLD를 EXACT_SELF보다 먼저 시도할지(결과: 겹친 셸을 합치지 않고 그대로 둠).
+7. ~~큰 자기교차 메시에서 EXACT_SELF가 느림~~ → **결정됨(2026-10-09, 사용자)**: 씬 설정 `boolean_quality`(Settings 패널 "Booleans").
+   Auto(기본) = 대상 면 > 200,000이면 Fast 순서, 아니면 Accurate; Accurate = EXACT → EXACT_SELF(셸 교차 시 처음부터) → MANIFOLD → float → voxel;
+   Fast = MANIFOLD 먼저(검증), 실패 시 Accurate 체인. 트레이드오프: MANIFOLD는 교차하는 셸(Suzanne 눈↔머리)을 합치지 않고 겹친 채로 둔다
+   (각 셸이 따로 잘림, 슬라이서가 합침), Accurate(EXACT_SELF)는 하나의 솔리드로 합친다. Build 정보 줄에 사용한 솔버
+   ("Booleans (Auto): 2x MANIFOLD, …; fallbacks: …"). 51만 면 실측(5.2): 평면 Build Auto 14.4 s / Accurate 60.5 s, S자 Build Auto 6.2 s / Accurate 86.7 s.

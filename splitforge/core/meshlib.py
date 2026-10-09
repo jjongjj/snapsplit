@@ -457,3 +457,26 @@ def shells(bm):
                     stack.append(other)
         out.append(shell)
     return out
+
+
+def triangulation_slack(faces):
+    """Volume a boolean may change by re-triangulating these faces (non-planar quads, n-gons).
+
+    For each face with more than 3 corners: |signed volume of the fan from corner 0
+    - fan from corner 1| (zero for planar faces). A cut through a coarse, non-planar
+    mesh (e.g. Suzanne) changes the closed volume by up to this much.
+    """
+    total = 0.0
+    for f in faces:
+        vs = [v.co for v in f.verts]
+        n = len(vs)
+        if n < 4:
+            continue
+        diff = 0.0
+        for k, sign in ((0, 1.0), (1, -1.0)):
+            o = vs[k]
+            for i in range(1, n - 1):
+                a, b = vs[(k + i) % n], vs[(k + i + 1) % n]
+                diff += sign * o.dot(a.cross(b))
+        total += abs(diff) / 6.0
+    return total

@@ -53,6 +53,14 @@ def _redraw(_self, context):
             area.tag_redraw()
 
 
+def _gap_changed(self, context):
+    """A stroke cut may become invalid with a larger gap: re-check and keep the message for the panel."""
+    _redraw(self, context)
+    if self.kind == 'STROKE':
+        from . import stack
+        self.problem = stack.stroke_problem(self.id_data, self, context.scene)
+
+
 def _material_changed(self, context):
     self.clearance_mm = MATERIAL_PROFILES.get(self.material, self.clearance_mm)
 
@@ -112,7 +120,8 @@ class SPLITFORGE_PG_Cut(PropertyGroup):
                                  update=_redraw,
                                  description="Seam frame U axis (projected into the plane)")
     gap_mm: FloatProperty(name="Gap (mm)", default=0.0, min=0.0, soft_max=5.0, precision=2,
-                          update=_redraw, description="Material removed along the cut (kerf)")
+                          update=_gap_changed, description="Material removed along the cut (kerf)")
+    problem: StringProperty(name="Problem", description="Why this stroke cut cannot be built (empty if it can)")
     cap: BoolProperty(name="Cap", default=True, description="Close the cut faces")
     connectors: CollectionProperty(type=SPLITFORGE_PG_Connector)
     active_connector: IntProperty(name="Active connector", default=0, min=0)
@@ -132,11 +141,6 @@ class SPLITFORGE_PG_CutStack(PropertyGroup):
         ('DRAFT', "Draft", "Edit a stack of cuts, then Build"),
         ('EASY', "Easy", "One click: add an axis cut and build immediately"),
     ])
-    solver: EnumProperty(name="Solver", default='AUTO', items=[
-        ('AUTO', "Auto", "Exact, falling back to the faster solvers on failure"),
-        ('EXACT', "Exact", "Exact boolean first"),
-        ('FAST', "Fast", "Fast (float) boolean first"),
-    ], description="Boolean solver for connectors")
     last_build_collection: PointerProperty(type=bpy.types.Collection, name="Result")
     schema_version: IntProperty(default=SCHEMA_VERSION)
     next_uid: IntProperty(default=1, min=1)
@@ -145,6 +149,15 @@ class SPLITFORGE_PG_CutStack(PropertyGroup):
 class SPLITFORGE_PG_Settings(PropertyGroup):
     """Scene-wide settings of the new workflow."""
     show_overlay: BoolProperty(name="Show cuts in viewport", default=True, update=_redraw)
+    boolean_quality: EnumProperty(name="Booleans", default='AUTO', items=[
+        ('AUTO', "Auto", "Fast on meshes over 200,000 faces, Accurate below"),
+        ('ACCURATE', "Accurate",
+         "Exact solver first (with self-intersection handling when shells intersect): intersecting "
+         "shells, e.g. eyes set into a head, are united into one solid. Slow on large meshes"),
+        ('FAST', "Fast",
+         "Manifold solver first, much faster on large meshes, but intersecting shells stay "
+         "overlapping (each is cut on its own; slicers unite them). Falls back to Accurate on failure"),
+    ], description="Boolean solver order for curved cuts and connectors; every result is validated")
     material: EnumProperty(name="Material", items=MATERIALS, default='PLA', update=_material_changed)
     clearance_mm: FloatProperty(name="Clearance (mm)", default=0.20, min=0.0, max=2.0, precision=2,
                                 description="Default socket clearance per side")

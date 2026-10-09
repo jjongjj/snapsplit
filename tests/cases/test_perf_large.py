@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Slow: ~510k-face Suzanne: legacy split (3 parts + 3 CYL_PIN per seam) and SplitForge Build, timed."""
+"""Slow: ~510k-face Suzanne: legacy split (3 parts + 3 CYL_PIN per seam) and SplitForge Build, timed.
+
+SplitForge planar (2 Z cuts + pins) and curved (S stroke, gap 0.3, 2 pins) builds run with the
+Boolean quality Auto (MANIFOLD first above 200k faces) and Accurate (exact chain)."""
 
 import time
 
@@ -58,13 +61,19 @@ def run(ctx):
         cut = monkey.splitforge_stack.cuts[-1]
         cut.connector_count = 3
         lib.run_op(bpy.ops.splitforge.connector_add_auto)
-    t0 = time.perf_counter()
-    lib.run_op(bpy.ops.splitforge.build)
-    ctx.metric("build_s", round(time.perf_counter() - t0, 2))
-    parts = [o for o in bpy.data.objects if o.get("splitforge_source") == monkey.name]
-    assert len(parts) == 3, [o.name for o in parts]
-    for p in parts:
-        assert lib.is_manifold(p), f"{p.name} not manifold after build"
+    build = ctx.module("cuts.build")
+    for quality in ('AUTO', 'ACCURATE'):
+        bpy.context.scene.splitforge.boolean_quality = quality
+        lib.select_only([monkey])
+        monkey.hide_set(False)
+        t0 = time.perf_counter()
+        result = build.build(bpy.context, monkey)
+        ctx.metric(f"build_s_{quality.lower()}", round(time.perf_counter() - t0, 2))
+        ctx.metric(f"build_solvers_{quality.lower()}", ",".join(entry[1] for entry in result.booleans))
+        parts = [o for o in bpy.data.objects if o.get("splitforge_source") == monkey.name]
+        assert len(parts) == 3, [o.name for o in parts]
+        for p in parts:
+            assert lib.is_manifold(p), f"{p.name} not manifold after build ({quality})"
 
     # P2-7: curved (S) stroke cut on the same ~510k-face Suzanne, gap 0.3 mm, Distribute + Build
     bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
@@ -87,17 +96,21 @@ def run(ctx):
     lib.run_op(bpy.ops.splitforge.connector_add_auto)
     ctx.metric("stroke_distribute_s", round(time.perf_counter() - t0, 2))
     ctx.metric("stroke_connectors", len(cut.connectors))
-    build = ctx.module("cuts.build")
-    t0 = time.perf_counter()
-    result = build.build(bpy.context, monkey)
-    elapsed = time.perf_counter() - t0
-    ctx.metric("stroke_build_s", round(elapsed, 2))
-    ctx.metric("stroke_booleans", "; ".join(f"{label}={solver}({'/'.join(f'{a}:{s}s' for a, _r, s in att)})"
-                                           for label, solver, att in result.booleans))
-    assert not result.warnings, result.warnings
-    parts = [bpy.data.objects[n] for n in result.parts]
-    assert len(parts) == 2, result.parts
-    for p in parts:
-        assert lib.is_manifold(p), f"{p.name} not manifold after stroke build"
-    if bpy.app.version >= (5, 0, 0):
-        assert elapsed < 120.0, f"stroke build took {elapsed:.1f} s (limit 120 s on 5.2)"
+    for quality in ('AUTO', 'ACCURATE'):
+        bpy.context.scene.splitforge.boolean_quality = quality
+        lib.select_only([monkey])
+        monkey.hide_set(False)
+        t0 = time.perf_counter()
+        result = build.build(bpy.context, monkey)
+        elapsed = time.perf_counter() - t0
+        q = quality.lower()
+        ctx.metric(f"stroke_build_s_{q}", round(elapsed, 2))
+        ctx.metric(f"stroke_booleans_{q}", "; ".join(
+            f"{label}={solver}({'/'.join(f'{a}:{s}s' for a, _r, s in att)})" for label, solver, att in result.booleans))
+        assert not result.warnings, result.warnings
+        parts = [bpy.data.objects[n] for n in result.parts]
+        assert len(parts) == 2, result.parts
+        for p in parts:
+            assert lib.is_manifold(p), f"{p.name} not manifold after stroke build ({quality})"
+        if bpy.app.version >= (5, 0, 0):
+            assert elapsed < 120.0, f"stroke build ({quality}) took {elapsed:.1f} s (limit 120 s on 5.x)"
