@@ -20,7 +20,7 @@
   검증: 임시 케이스 실행 시 종료코드 1, JSON 결과에 `"status":"FAIL"`과 `traceback` 키.
 - [x] **P0-5 베이스라인 케이스**: `test_legacy_split_cube.py`(Z 2분할, 파트 2, 매니폴드, 원본 존재), `test_legacy_split_monkey.py`(구멍 메운 Suzanne, 캡 포함 매니폴드), `test_legacy_connectors.py`(CYL_PIN 3개 후 매니폴드), `test_units.py`(mm 씬에서 `unit_mm()==1.0`).
   검증: `python3 tests/run_tests.py` → 4.5/5.2 모두 전체 PASS.
-- [ ] **P0-6 프리뷰 재질 버그 수정**: `build_orange_preview_material`에서 `shadow_method`·`blend_method`를 `hasattr` 가드. 케이스 `test_preview_material.py`(함수 호출 시 예외 없음, 재질 반환).
+- [x] **P0-6 프리뷰 재질 버그 수정**: `build_orange_preview_material`에서 `shadow_method`·`blend_method`를 `hasattr` 가드. 케이스 `test_preview_material.py`(함수 호출 시 예외 없음, 재질 반환).
   검증: 케이스 PASS 4.5/5.2. GUI: "Show split preview" 켜면 주황 평면이 보임(4.5, 5.2 각각 메모).
 - [x] **P0-7 로깅**: `snapsplit/core/log.py` 추가, `print("[SnapSplit DEBUG]…")` 전부 `log.debug`로 치환. 프리퍼런스 `debug_log` Bool(기본 False).
   검증: `grep -rn "SnapSplit DEBUG" snapsplit/ | wc -l` → `0`. 기본 설정으로 P0-5 실행 시 stdout에 `DEBUG` 문자열 없음(`python3 tests/run_tests.py --case test_legacy_split_monkey | grep -c DEBUG` → `0`).
