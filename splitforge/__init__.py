@@ -54,7 +54,9 @@ from . import ops_align
 from . import ops_freehand
 from .model import props as model_props
 from .ops import ops_stack, ops_cut_plane, ops_connector, ops_build, ops_export
-from . import ui
+from .ui import overlay as ui_overlay
+from .ui import panel as ui_panel
+from .ui import legacy as ui_legacy  # "Legacy" sub-panel of the main panel (until Phase 3)
 
 # Set to False for release builds to skip the development hot-reload.
 DEV_RELOAD = False
@@ -74,7 +76,9 @@ _modules = [
     ops_connector,
     ops_build,
     ops_export,
-    ui,
+    ui_overlay,
+    ui_panel,
+    ui_legacy,
 ]
 
 # Modules whose register() completed successfully (in registration order)
