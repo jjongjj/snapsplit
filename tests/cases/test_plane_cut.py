@@ -94,3 +94,28 @@ def run(ctx):
             lib.assert_close(cap_area, cap_ring, rel=1e-3, msg=f"hollow {normal} ring area")
             part.free()
     bm.free()
+
+    # Internal cavity the cut does not touch (0.3 mm slab at z 3.45..3.75): capping
+    # must not flip its normals (it used to recalc every face, turning the void into
+    # added volume)
+    cav = lib.make_cube(40.0)
+    slab = bmesh.new()
+    bmesh.ops.create_cube(slab, size=1.0)
+    for v in slab.verts:
+        v.co.x *= 30.0
+        v.co.y *= 30.0
+        v.co.z = 3.6 + v.co.z * 0.3
+    bmesh.ops.reverse_faces(slab, faces=slab.faces)
+    slab.normal_update()
+    bm = bmesh.new()
+    bm.from_mesh(cav.data)
+    for f in slab.faces:
+        bm.faces.new([bm.verts.new(v.co) for v in f.verts])
+    slab.free()
+    bm.normal_update()
+    lib.assert_close(bm.calc_volume(signed=True), 64000.0 - 270.0, rel=1e-6, msg="cavity source")
+    pos, neg, ok = plane.split(bm, Vector((0.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), 0.0)
+    assert ok
+    lib.assert_close(pos.calc_volume(signed=True), 32000.0 - 270.0, rel=1e-6, msg="cavity kept as a void")
+    lib.assert_close(neg.calc_volume(signed=True), 32000.0, rel=1e-6)
+    pos.free(), neg.free(), bm.free()

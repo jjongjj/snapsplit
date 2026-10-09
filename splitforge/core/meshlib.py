@@ -333,6 +333,7 @@ def cap_plane(bm, co, no, eps):
         log.info("section loops have inconsistent winding; using even-odd nesting")
         groups = group_loops_by_nesting(loops_2d)
     ok = True
+    before = set(bm.faces)
     for outer, holes in groups:
         edges = list(loops[outer])
         for k in holes:
@@ -341,8 +342,27 @@ def cap_plane(bm, co, no, eps):
         if not _fill_group(bm, edges, n, len(holes), expected):
             log.warning("could not cap a section loop (%d hole(s))", len(holes))
             ok = False
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    # Orient the new caps like their surroundings: recalc only the connected
+    # regions that received a cap. A separate shell the cut did not touch (an
+    # internal cavity, whose normals point into the void) must keep its normals.
+    capped = [f for f in bm.faces if f not in before]
+    if capped:
+        bmesh.ops.recalc_face_normals(bm, faces=connected_faces(capped))
     return ok, len(loops)
+
+
+def connected_faces(seeds):
+    """All faces edge-connected to ``seeds`` (flood fill)."""
+    seen = set(seeds)
+    stack = list(seeds)
+    while stack:
+        f = stack.pop()
+        for e in f.edges:
+            for g in e.link_faces:
+                if g not in seen:
+                    seen.add(g)
+                    stack.append(g)
+    return list(seen)
 
 
 # ---------------------------------------------------------------------------
