@@ -4,8 +4,8 @@
 # ops/ops_connector_click.py
 """Place connectors on the active cut's seam by clicking in the viewport (modal).
 
-The mouse ray is intersected with the seam: the cut plane, or the ribbon of a
-stroke cut. A preview of the new connector (the scene's new-connector type and
+The mouse ray is intersected with the seam: the cut plane, the ribbon of a
+stroke or polyline cut, or the floor of a polygon cut-out. A preview of the new connector (the scene's new-connector type and
 size) follows the cursor, green where the seam lies inside the object, red
 elsewhere. LMB places a connector there if it fits in 3D (inside the object
 with MIN_WALL_MM of material, not across another cut or its own curved seam,
@@ -36,6 +36,7 @@ from mathutils.geometry import intersect_line_plane
 from ..connectors import auto, fit, placement, shapes
 from ..core import log, naming, units
 from ..cuts import build
+from ..cuts.stroke import RIBBON_KINDS
 from ..model import stack as stack_api
 
 FIT_COLOR = (0.2, 1.0, 0.35, 1.0)
@@ -110,7 +111,7 @@ class _Seam:
         finally:
             bm.free()
         self.ribbon = None
-        if self.spec.kind == 'STROKE':
+        if self.spec.kind in RIBBON_KINDS:
             ribbon = self.spec.cutter.ribbon()
             try:
                 self.ribbon = BVHTree.FromBMesh(ribbon)
@@ -121,14 +122,14 @@ class _Seam:
     @staticmethod
     def key(context, obj, cut):
         return (obj.name, tuple(tuple(r) for r in obj.matrix_world), cut.uid, cut.kind, tuple(cut.origin),
-                tuple(cut.normal), tuple(cut.tangent), round(cut.gap_mm, 9), tuple(cut.direction),
+                tuple(cut.normal), tuple(cut.tangent), round(cut.gap_mm, 9), round(cut.depth_mm, 9), tuple(cut.direction),
                 hash(tuple(tuple(p.co) for p in cut.points)), _mesh_key(obj),
                 round(context.scene.unit_settings.scale_length, 12))
 
     def hit(self, origin, direction):
         """(world point, u_mm, v_mm, inside the object) where the ray meets the seam, or None."""
         spec = self.spec
-        if spec.kind == 'STROKE':
+        if spec.kind in RIBBON_KINDS:
             p = self.ribbon.ray_cast(origin, direction)[0]
             if p is None:
                 return None
@@ -167,6 +168,13 @@ class SPLITFORGE_OT_connector_add_click(Operator):
             if shape is None:
                 self.report({'ERROR'}, why[:1].upper() + why[1:])
                 return {'CANCELLED'}
+        try:
+            no_floor = auto.through_polygon_message(build.cut_spec(obj, cut, context.scene))
+        except build.BuildError as ex:
+            no_floor = str(ex)
+        if no_floor:
+            self.report({'ERROR'}, no_floor)
+            return {'CANCELLED'}
         self._obj_name = obj.name
         self._uid = cut.uid
         self._side = s.new_connector.pin_side
@@ -245,7 +253,7 @@ class SPLITFORGE_OT_connector_add_click(Operator):
         stack = stack_api.get_stack(obj)
         others = [o.barrier() for o in build.cut_specs(
             obj, [c for c in stack.cuts if c.enabled and c.uid != cut.uid], scene)]
-        own = seam.spec.barrier() if seam.spec.kind == 'STROKE' else None
+        own = seam.spec.barrier() if seam.spec.kind != 'PLANE' else None
         custom = None
         if t.kind == 'CUSTOM':
             custom, why = build.custom_shape_of(t.custom_object, context.evaluated_depsgraph_get())

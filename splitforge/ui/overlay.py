@@ -4,8 +4,9 @@
 # ui/overlay.py
 """Viewport overlay (gpu draw handler) for the cut stack of the active object.
 
-Draws each cut plane as a translucent quad and each stroke cut as its ribbon
-over the object's depth (active cut orange, others blue, disabled ones as a
+Draws each cut plane as a translucent quad, each stroke or polyline cut as its
+ribbon over the object's depth, each polygon cut as its prism (walls; the floor
+of a cut-out with a depth) (active cut orange, others blue, disabled ones as a
 grey outline), and each connector as a circle/rectangle on its seam with a
 short stroke towards the pin side. Nothing is cached: every
 redraw resolves the active object's stack again, and no data-blocks are ever
@@ -21,7 +22,7 @@ from mathutils import Vector
 
 from ..connectors import placement, shapes
 from ..core import log, naming, units
-from ..cuts import plane, stroke
+from ..cuts import plane, polygon, stroke
 from ..model import stack as stack_api
 
 ACTIVE_FILL = (1.0, 0.45, 0.0, 0.30)
@@ -79,6 +80,42 @@ def _loop_lines(points):
     return out
 
 
+def polygon_prism(obj, cut, mm):
+    """(triangles, outline segments, matrix_fn) of a polygon cut's prism over the object's depth (to
+    its floor), matrix_fn on the floor (None without a floor or for an invalid polygon)."""
+    m = obj.matrix_world
+    pts = [m @ Vector(p.co) for p in cut.points]
+    d = (m.to_3x3() @ Vector(cut.direction)).normalized()
+    corners = [m @ Vector(c) for c in obj.bound_box]
+    if len(pts) < 3 or d.length < 1e-9:
+        return [], [], None
+    try:
+        cutter = polygon.build_cutter(pts, d, corners, 0.0, cut.depth_mm * mm)
+    except stroke.StrokeError:
+        frame = stroke.Frame.from_direction(d, sum(pts, Vector()) / len(pts))
+        loop = [frame.to3d(*frame.to2d(p)) for p in pts]
+        return [], _loop_lines(loop), None
+    f = cutter.frame
+    depths = [f.depth(c) for c in corners]
+    z0 = min(depths)
+    z1 = cutter.z_floor if not cutter.through else max(depths)
+    lo = [f.to3d(x, y, z0) for x, y in cutter.poly]
+    hi = [f.to3d(x, y, z1) for x, y in cutter.poly]
+    tris, segs = [], _loop_lines(lo) + _loop_lines(hi)
+    n = len(lo)
+    for i in range(n):
+        j = (i + 1) % n
+        tris += [lo[i], lo[j], hi[j], lo[i], hi[j], hi[i]]
+        segs += [lo[i], hi[i]]
+    if cutter.through:
+        return tris, segs, None
+    co, nn, t = cutter.floor_frame()
+
+    def matrix_fn(u, v, rot):
+        return placement.frame_matrix(co, nn, t, u, v, rot)
+    return tris, segs, matrix_fn
+
+
 def stroke_ribbon(obj, cut):
     """(quads as triangle list, outline segments, matrix_fn) of a stroke cut's ribbon in world space.
 
@@ -105,7 +142,7 @@ def stroke_ribbon(obj, cut):
         mid_a, mid_b = (lo[i] + hi[i]) * 0.5, (lo[i + 1] + hi[i + 1]) * 0.5
         segs += [mid_a, mid_b]
     segs += [lo[0], hi[0], lo[-1], hi[-1]]
-    return tris, segs, stroke.Centerline(frame, pts2).matrix
+    return tris, segs, stroke.Centerline(frame, pts2, sharp=(cut.kind == 'POLYLINE')).matrix
 
 
 def geometry(context):
@@ -119,8 +156,10 @@ def geometry(context):
     fills, lines = [], []
     for i, cut in enumerate(stack.cuts):
         active = i == stack.active_index
-        if cut.kind == 'STROKE':
+        if cut.kind in stroke.RIBBON_KINDS:
             tris, outline, matrix_fn = stroke_ribbon(obj, cut)
+        elif cut.kind == 'POLYGON':
+            tris, outline, matrix_fn = polygon_prism(obj, cut, mm)
         else:
             co, n, t, b = plane.world_frame(obj.matrix_world, cut.origin, cut.normal, cut.tangent)
             quad = plane_quad(obj, co, n, t, b)

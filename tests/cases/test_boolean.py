@@ -56,11 +56,12 @@ def run(ctx):
 
 def _run(ctx):
     boolean = ctx.module("core.boolean")
-    compat = ctx.module("core.compat")
     log = ctx.module("core.log")
     lib.set_scene_mm()
-    fast = compat.float_solver()
-    has_manifold = 'MANIFOLD' in compat.boolean_solvers()
+    fast = 'FLOAT'
+    has_manifold = True
+    solvers = [i.identifier for i in bpy.types.BooleanModifier.bl_rna.properties['solver'].enum_items]
+    assert {'EXACT', 'MANIFOLD', 'FLOAT'} <= set(solvers), solvers
 
     # --- attempt order by quality ------------------------------------------------------
     accurate = ['EXACT', 'EXACT_SELF'] + (['MANIFOLD'] if has_manifold else []) + [fast, 'VOXEL']

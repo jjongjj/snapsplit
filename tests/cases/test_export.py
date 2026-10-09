@@ -33,6 +33,33 @@ def run(ctx):
     assert len(parts) == 2
     tris = {p.name: _triangles(p) for p in parts}
     dims = {p.name: tuple(p.dimensions) for p in parts}
+    # A folder that cannot be created (below an existing file): a clean error, no traceback, no files
+    os.makedirs(out, exist_ok=True)
+    blocker = os.path.join(out, "not_a_folder")
+    with open(blocker, "w") as f:
+        f.write("x")
+    try:
+        bpy.ops.splitforge.export_parts(directory=os.path.join(blocker, "sub"), formats={'STL'})
+    except RuntimeError as ex:
+        msg = str(ex)
+    else:
+        raise AssertionError("export into a folder below a file did not fail")
+    assert "Cannot create the export folder" in msg and "Traceback" not in msg, msg
+    ctx.metric("bad_folder", msg.strip().splitlines()[0][:120])
+    os.remove(blocker)
+    # A file that cannot be written (a folder of that name is in the way): a clean error naming it
+    jam = os.path.join(bpy.app.tempdir, "export_jam")
+    shutil.rmtree(jam, ignore_errors=True)
+    os.makedirs(os.path.join(jam, "Exp_A.stl"))
+    try:
+        bpy.ops.splitforge.export_parts(directory=jam, formats={'STL'})
+    except RuntimeError as ex:
+        msg = str(ex)
+    else:
+        raise AssertionError("export onto a folder did not fail")
+    assert "Could not write" in msg and "Exp_A.stl" in msg and "Traceback" not in msg, msg
+    ctx.metric("bad_file", msg.strip().splitlines()[0][:120])
+    shutil.rmtree(jam, ignore_errors=True)
     lib.run_op(bpy.ops.splitforge.export_parts, directory=out, formats={'STL', 'OBJ'})
     files = sorted(os.listdir(out))
     assert files == ["Exp_A.obj", "Exp_A.stl", "Exp_B.obj", "Exp_B.stl"], files

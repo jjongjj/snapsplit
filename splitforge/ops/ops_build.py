@@ -189,7 +189,7 @@ def easy_finish(op, context, obj, index, count, next_uid):
 
 
 class SPLITFORGE_OT_validate(Operator):
-    """Check the source mesh for printing: manifold, loose geometry, applied transforms, mm units"""
+    """Check the source mesh for printing: holes and non-manifold edges, loose geometry, normals, duplicate vertices, applied transforms, mm units (results and Fix buttons in the panel)"""
     bl_idname = naming.op("validate")
     bl_label = "Check Mesh"
     bl_options = {'REGISTER'}
@@ -201,7 +201,8 @@ class SPLITFORGE_OT_validate(Operator):
     def execute(self, context):
         rep = validate.validate(stack_api.context_owner(context), context.scene)
         if rep.ok:
-            self.report({'INFO'}, "Mesh is ready: manifold, transforms applied, 1 unit = 1 mm")
+            self.report({'INFO'}, "Mesh is ready: closed, normals outward, no duplicates, transforms applied, "
+                                  "1 unit = 1 mm")
         for m in rep.messages:
             self.report({'WARNING'}, m)
         return {'FINISHED'}

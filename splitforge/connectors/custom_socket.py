@@ -4,25 +4,36 @@
 # connectors/custom_socket.py
 """Socket of a custom connector mesh: the pin grown by the clearance in every direction.
 
-The quick way is to move every vertex outward along its normal (times the shell
-factor, like Solidify's even thickness). That is exact for convex shapes, but
-it folds where a slot or notch is narrower than twice the clearance (the two
-walls' offsets cross) and loses clearance at concave or sharp corners (defect
-D17). So the result is checked: the offset mesh must unite into a clean solid
-and keep at least ``MIN_CLEARANCE_SHARE`` x clearance from every sample of the
-pin surface (vertices, edge points, face centers). If it does not, the socket is
-built as a Minkowski sum instead: the pin united with a prism over every face
-(the face pushed out by the clearance), a cylinder around every edge and a
-ball at every vertex (polygons sized so their inner radius is the clearance).
-That is correct for any shape, slots narrower than 2 x clearance simply fill,
-but costs one larger union, so it is only used when needed and for meshes of at
-most MINKOWSKI_MAX_TRIS triangles. If no candidate reaches the required
-clearance, the best one is used and a note (Build warning) says how much
-clearance it has.
+The socket is the Minkowski sum of the pin and a ball of radius ``c`` (the
+clearance), approximated by a polytope ball whose faces are all at least ``c``
+from its center (so the clearance is never less than ``c``, at most ~3 % more):
 
-Results are cached per shape, size and clearance (plain vertex/face lists): the
-fit checks of Distribute ask for the same socket many times. Uses temporary
-objects through core/boolean.py (Build / operator context only).
+1. Convex pin: the convex hull of every pin vertex plus the ball points. This is
+   the exact Minkowski sum, needs no boolean and takes milliseconds.
+2. Otherwise the vertex-normal offset (every vertex moved outward along its
+   normal times the shell factor, like Solidify's even thickness): exact for
+   smooth shapes, but it folds where a slot or notch is narrower than twice the
+   clearance and loses clearance at concave or sharp corners (defect D17). It is
+   checked: it must unite into a clean solid and keep at least
+   ``MIN_CLEARANCE_SHARE`` x clearance from every sample of the pin surface
+   (vertices, edge points, face centers).
+3. If the offset fails: the pin united with one convex hull per face (the face's
+   vertices plus the ball points = the face grown by the clearance, with its edges
+   and corners rounded). Correct for any shape (slots narrower than 2 x clearance
+   simply fill), one union of F + 1 convex pieces, used for meshes of at most
+   MINKOWSKI_MAX_TRIS triangles. (Defect D19: this replaced a sum of face prisms,
+   edge cylinders and vertex balls that took 20-45 s for a 17-face cone.)
+
+If no candidate reaches the required clearance, the best one is used and a note
+(Build warning) says how much clearance it has.
+
+Results are cached per shape, size, clearance and sample step (plain
+vertex/face lists, in a canonical connector frame: the pin side, gap and insert
+depth only move the result rigidly, see shapes.connector_solids), so Distribute's
+fit checks, both pin sides and repeated builds compute a socket once per session.
+The slow path (3) shows a wait cursor and a status bar text in the UI
+(core/progress.busy). Uses temporary objects through core/boolean.py (Build /
+operator context only).
 """
 
 import math
@@ -31,16 +42,20 @@ import bmesh
 from mathutils import Matrix
 from mathutils.bvhtree import BVHTree
 
-from ..core import boolean
+from ..core import boolean, progress
 from . import fit
 
 MIN_CLEARANCE_SHARE = 0.9
 MINKOWSKI_MAX_TRIS = 4000
-EDGE_SEGMENTS = 8
-FLAT_DOT = 1.0 - 1e-6        # edges between (nearly) coplanar faces need no cylinder
+# Ball polytope: icosphere subdivisions (2: 42 points, its corners 2.6 % beyond the inner radius;
+# 3: 162 points, 0.7 %); a convex pin's hull uses 3 while vertices x points stays below the limit
+BALL_SUBDIVISIONS = 2
+CONVEX_BALL_SUBDIVISIONS = 3
+CONVEX_MAX_POINTS = 400000
 CACHE_SIZE = 64
 
 _CACHE = {}
+_BALLS = {}
 
 
 def _bm(verts, faces):
@@ -78,108 +93,157 @@ def _offset(bm, distance):
     return [v.co + v.normal * distance * min(v.calc_shell_factor(), 3.0) for v in bm.verts]
 
 
-def _minkowski(pin, c):
-    """Pin + clearance ball as one bmesh of overlapping pieces (to be united)."""
-    # Prisms over the polygons (not their triangles: coplanar neighbour prisms would share walls,
-    # which the exact solver cannot resolve); only non-planar polygons are triangulated
-    tri = pin.copy()
-    tri.normal_update()
-    first = next(iter(tri.verts)).co.copy()
-    size = max((v.co - first).length for v in tri.verts)
-    bent = [f for f in tri.faces if max(abs((v.co - f.verts[0].co).dot(f.normal)) for v in f.verts) > 1e-6 * size]
-    if bent:
-        bmesh.ops.triangulate(tri, faces=bent)
-        tri.normal_update()
-    out = pin.copy()
-    for f in tri.faces:
-        n = f.normal
+def ball_points(c, subdivisions=BALL_SUBDIVISIONS):
+    """Vertices of an icosphere whose faces are all at least ``c`` from its center (inner radius c)."""
+    key = (subdivisions,)
+    unit = _BALLS.get(key)
+    if unit is None:
+        bm = bmesh.new()
+        try:
+            bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=1.0)
+            bm.normal_update()
+            inner = min(f.normal.dot(f.verts[0].co) for f in bm.faces)
+            unit = _BALLS[key] = [v.co / inner for v in bm.verts]
+        finally:
+            bm.free()
+    return [p * c for p in unit]
+
+
+def is_convex(bm, tol):
+    """True if no vertex lies more than ``tol`` outside the plane of any face (normals current)."""
+    verts = [v.co for v in bm.verts]
+    for f in bm.faces:
+        p, n = f.verts[0].co, f.normal
         if n.length < 0.5:
             continue
-        base = [v.co.copy() for v in f.verts]
-        k = len(base)
-        top = [p + n * c for p in base]
-        # Reach slightly below the face so the prism overlaps the pin instead of touching it
-        low = [p - n * (0.05 * c) for p in base]
-        vs = [out.verts.new(p) for p in low + top]
-        out.faces.new(list(reversed(vs[:k])))
-        out.faces.new(vs[k:])
-        for i in range(k):
-            j = (i + 1) % k
-            out.faces.new((vs[i], vs[j], vs[k + j], vs[k + i]))
-    r_edge = c / math.cos(math.pi / EDGE_SEGMENTS)
-    corners = set()
-    for e in tri.edges:
-        if len(e.link_faces) == 2 and e.link_faces[0].normal.dot(e.link_faces[1].normal) > FLAT_DOT:
-            continue
-        a, b = e.verts[0].co, e.verts[1].co
-        d = b - a
-        if d.length < 1e-9:
-            continue
-        rot = d.normalized().to_track_quat('Z', 'X').to_matrix().to_4x4()
-        bmesh.ops.create_cone(out, cap_ends=True, segments=EDGE_SEGMENTS, radius1=r_edge, radius2=r_edge,
-                              depth=d.length, matrix=Matrix.Translation((a + b) * 0.5) @ rot)
-        corners.update((e.verts[0].index, e.verts[1].index))
-    tri.verts.ensure_lookup_table()
-    for i in corners:
-        # An icosphere (2 subdivisions) of radius R keeps all its faces at least 0.98 R from its center
-        bmesh.ops.create_icosphere(out, subdivisions=2, radius=c / 0.975,
-                                   matrix=Matrix.Translation(tri.verts[i].co))
+        if any((q - p).dot(n) > tol for q in verts):
+            return False
+    return True
+
+
+def hull(points):
+    """Closed convex hull bmesh (outward normals) of ``points``; caller frees it."""
+    bm = bmesh.new()
+    verts = [bm.verts.new(p) for p in points]
+    bmesh.ops.convex_hull(bm, input=verts)
+    loose = [v for v in bm.verts if not v.link_faces]
+    if loose:
+        bmesh.ops.delete(bm, geom=loose, context='VERTS')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bm.normal_update()
+    return bm
+
+
+def _convex_face(f, tol):
+    """True for a planar convex polygon (a triangle always)."""
+    if len(f.verts) == 3:
+        return True
+    n = f.normal
+    co = [v.co for v in f.verts]
+    if any(abs((q - co[0]).dot(n)) > tol for q in co):
+        return False
+    k = len(co)
+    return all((co[(i + 1) % k] - co[i]).cross(co[(i + 2) % k] - co[(i + 1) % k]).dot(n) >= -tol * tol
+               for i in range(k))
+
+
+def minkowski_pieces(pin, c):
+    """Pin + one convex hull per (convex) face of the pin grown by the ball, as one bmesh of
+    overlapping closed pieces (to be united). Non-planar or concave faces are triangulated."""
+    tri = pin.copy()
+    tri.normal_update()
+    size = max(bm_size(tri), 1e-9)
+    tol = 1e-6 * size
+    bad = [f for f in tri.faces if not _convex_face(f, tol)]
+    if bad:
+        bmesh.ops.triangulate(tri, faces=bad)
+        tri.normal_update()
+    ball = ball_points(c)
+    out = pin.copy()
+    for f in tri.faces:
+        piece = hull([v.co + b for v in f.verts for b in ball])
+        try:
+            _append_bm(out, piece)
+        finally:
+            piece.free()
     tri.free()
-    # Consistent outward normals for every piece (the union counts windings)
-    bmesh.ops.recalc_face_normals(out, faces=out.faces[:])
     return out
+
+
+def bm_size(bm):
+    first = next(iter(bm.verts)).co
+    return max((v.co - first).length for v in bm.verts)
+
+
+def _append_bm(dst, src):
+    """Copy the faces of ``src`` into ``dst`` (plain bmesh copy, no data-blocks)."""
+    vmap = {v: dst.verts.new(v.co) for v in src.verts}
+    for f in src.faces:
+        dst.faces.new([vmap[v] for v in f.verts])
 
 
 def _share(got, c):
     return f"{100.0 * max(got, 0.0) / c:.0f} %" if c > 0.0 else "0 %"
 
 
-def socket(verts, faces, c, step):
+def socket(verts, faces, c, step, name="custom"):
     """(socket verts, socket faces, achieved clearance, note) for a custom pin given in its connector frame.
 
     ``step``: sample spacing of the clearance check. ``note`` is "" when the
-    clearance is at least MIN_CLEARANCE_SHARE x ``c``.
+    clearance is at least MIN_CLEARANCE_SHARE x ``c``. ``name``: the mesh, for the
+    status text of the slow path.
     """
     key = (tuple(tuple(round(x, 9) for x in v) for v in verts), tuple(faces), round(c, 9), round(step, 9))
     hit = _CACHE.get(key)
     if hit is not None:
         return hit
     pin = _bm(verts, faces)
+    candidates = []
     try:
         samples = pin_samples(pin, step)
         need = MIN_CLEARANCE_SHARE * c
-        candidates = []
-        # 1. vertex-normal offset (exact for convex shapes)
-        off = _bm(_offset(pin, c), faces)
-        united, _why = boolean.unite_bm(off)
-        off.free()
-        if united is not None:
-            candidates.append(("offset", united, clearance(united, samples)))
-        # 2. Minkowski sum, when the offset folded or lost clearance
+        # 1. convex pin: the hull of the vertices grown by the ball is the exact Minkowski sum
+        n_verts = len(pin.verts)
+        if c > 0.0 and is_convex(pin, 1e-6 * max(bm_size(pin), 1e-9)):
+            subdiv = next((k for k in (CONVEX_BALL_SUBDIVISIONS, BALL_SUBDIVISIONS)
+                           if n_verts * len(ball_points(1.0, k)) <= CONVEX_MAX_POINTS), None)
+            if subdiv is not None:
+                ball = ball_points(c, subdiv)
+                grown = hull([v.co + b for v in pin.verts for b in ball])
+                candidates.append(("hull", grown, clearance(grown, samples)))
+        # 2. vertex-normal offset (exact for smooth shapes)
         if not candidates or candidates[0][2] < need:
+            off = _bm(_offset(pin, c), faces)
+            united, _why = boolean.unite_bm(off)
+            off.free()
+            if united is not None:
+                candidates.append(("offset", united, clearance(united, samples)))
+        # 3. Minkowski sum of convex pieces, when the offset folded or lost clearance
+        if not candidates or max(cand[2] for cand in candidates) < need:
             n_tris = sum(len(f) - 2 for f in faces)
             if n_tris <= MINKOWSKI_MAX_TRIS:
-                pieces = _minkowski(pin, c)
-                united, _why = boolean.unite_bm(pieces)
-                pieces.free()
+                with progress.busy(f"building the socket of custom connector '{name}' ({len(faces)} faces)"):
+                    pieces = minkowski_pieces(pin, c)
+                    united, _why = boolean.unite_bm(pieces)
+                    pieces.free()
                 if united is not None:
                     candidates.append(("minkowski", united, clearance(united, samples)))
         if not candidates:
             off = _bm(_offset(pin, c), faces)
-            result = (*_to_lists(off), clearance(off, samples), "")
-            off.free()
-            result = (result[0], result[1], result[2],
-                      f"the custom socket could not be built cleanly (it keeps {_share(result[2], c)} of the "
+            got = clearance(off, samples)
+            result = (*_to_lists(off), got,
+                      f"the custom socket could not be built cleanly (it keeps {_share(got, c)} of the "
                       "clearance); simplify the custom mesh")
+            off.free()
         else:
             _method, best, got = max(candidates, key=lambda cand: cand[2])
             note = "" if got >= need else (f"the custom socket keeps only {_share(got, c)} of the clearance "
                                            "somewhere (a slot or corner finer than the clearance); "
                                            "simplify the custom mesh")
             result = (*_to_lists(best), got, note)
+    finally:
         for _m, bm, _g in candidates:
             bm.free()
-    finally:
         pin.free()
     if len(_CACHE) >= CACHE_SIZE:
         _CACHE.clear()

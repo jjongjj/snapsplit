@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Slow: ~510k-face Suzanne: SplitForge Build timed.
+"""Slow: ~510k-face Suzanne: SplitForge Build timed (P4: plus a polyline + polygon cut-out build).
 
 Planar (2 Z cuts + 3 pins per seam region), Phase 3 connector types (one Z cut with a dovetail,
 a snap pin, a custom mesh pin and a dowel) and curved (S stroke, gap 0.3, 2 pins) builds run
@@ -128,3 +128,33 @@ def run(ctx):
             assert lib.is_manifold(p), f"{p.name} not manifold after stroke build ({quality})"
         if bpy.app.version >= (5, 0, 0):
             assert elapsed < 120.0, f"stroke build ({quality}) took {elapsed:.1f} s (limit 120 s on 5.x)"
+
+    # P4: polyline (3 corners) + polygon cut-out (15 mm deep from the front, gap 0.3) on the same Suzanne
+    bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
+    lib.set_scene_mm()
+    monkey = big_monkey()
+    lib.select_only([monkey])
+    lib.run_op(bpy.ops.splitforge.stack_add_polyline, direction=(0.0, 1.0, 0.0),
+               points=[{"name": "", "co": p} for p in ((-60.0, 0.0, -14.0), (0.0, 0.0, -24.0), (60.0, 0.0, -14.0))])
+    square = ((-22.0, 0.0, 0.0), (6.0, 0.0, 0.0), (6.0, 0.0, 22.0), (-22.0, 0.0, 22.0))
+    t0 = time.perf_counter()
+    lib.run_op(bpy.ops.splitforge.stack_add_polygon, direction=(0.0, 1.0, 0.0), depth_mm=15.0,
+               points=[{"name": "", "co": p} for p in square])
+    ctx.metric("polygon_add_s", round(time.perf_counter() - t0, 2))
+    monkey.splitforge_stack.cuts[1].gap_mm = 0.3
+    for quality in ('AUTO', 'ACCURATE'):
+        bpy.context.scene.splitforge.boolean_quality = quality
+        lib.select_only([monkey])
+        monkey.hide_set(False)
+        t0 = time.perf_counter()
+        result = build.build(bpy.context, monkey)
+        elapsed = time.perf_counter() - t0
+        q = quality.lower()
+        ctx.metric(f"points_build_s_{q}", round(elapsed, 2))
+        ctx.metric(f"points_booleans_{q}", "; ".join(
+            f"{label}={solver}({'/'.join(f'{a}:{s}s' for a, _r, s in att)})" for label, solver, att in result.booleans))
+        assert not result.warnings, result.warnings
+        assert len(result.parts) >= 3, result.parts
+        for name in result.parts:
+            assert lib.is_manifold(bpy.data.objects[name]), f"{name} not manifold after points build ({quality})"
+        assert elapsed < 120.0, f"points build ({quality}) took {elapsed:.1f} s (limit 120 s)"

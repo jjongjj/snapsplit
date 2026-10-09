@@ -16,6 +16,8 @@ NEW = ("SPLITFORGE_OT_stack_add_plane", "SPLITFORGE_OT_stack_remove", "SPLITFORG
        "SPLITFORGE_OT_validate", "SPLITFORGE_OT_connector_add_auto", "SPLITFORGE_OT_connector_add",
        "SPLITFORGE_OT_connector_remove", "SPLITFORGE_OT_connector_add_click",
        "SPLITFORGE_OT_connector_custom_size", "SPLITFORGE_OT_export_parts", "SPLITFORGE_OT_stack_add_stroke",
+       "SPLITFORGE_OT_stack_add_polyline", "SPLITFORGE_OT_stack_add_polygon", "SPLITFORGE_OT_fix_transforms",
+       "SPLITFORGE_OT_fix_units", "SPLITFORGE_OT_fix_normals", "SPLITFORGE_OT_fix_merge", "SPLITFORGE_OT_fix_holes",
        "SPLITFORGE_PT_main", "SPLITFORGE_PT_connectors", "SPLITFORGE_PT_build", "SPLITFORGE_PT_settings",
        "SPLITFORGE_UL_cuts", "SPLITFORGE_UL_connectors")
 

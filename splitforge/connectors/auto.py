@@ -24,6 +24,10 @@ Seam regions in (u, v) mm:
   cuts' gaps; samples are grouped by their side of each other cut, and each
   group's cell boundary gives the loops. The raster (at most RASTER_SAMPLES
   cells, at least RASTER_MIN_MM) only guides placement; the 3D check decides.
+  A polyline cut is a stroke cut with straight segments.
+- polygon cut with a depth: its floor (a plane at the depth, inside the
+  polygon shrunk by half the gap), rastered the same way; a polygon through
+  the whole object has no floor and so no seam for connectors.
 """
 
 import math
@@ -34,6 +38,7 @@ from mathutils.bvhtree import BVHTree
 
 from ..core import meshlib, naming, units
 from ..cuts import build
+from ..cuts.stroke import RIBBON_KINDS
 from ..model import stack as stack_api
 from . import fit, placement, shapes
 
@@ -96,13 +101,25 @@ def stroke_regions(spec, source_bvh, others, corners, scene):
                units.mm_to_scene(RASTER_MIN_MM, scene))
     nu = max(1, math.ceil((u_hi - u_lo) / step))
     nv = max(1, math.ceil((v_hi - v_lo) / step))
-    barriers = [o.barrier() for o in others]
-    labels = {}
     d = cutter.frame.d
+    bases = [cl.frame_at(u_lo + (i + 0.5) * step, 0.0)[0] for i in range(nu)]
+
+    def point(i, j):
+        return bases[i] + d * (v_lo + (j + 0.5) * step)
+
+    return _raster_regions(point, nu, nv, u_lo, v_lo, step, source_bvh, [o.barrier() for o in others], scene)
+
+
+def _raster_regions(points_fn, nu, nv, u_lo, v_lo, step, source_bvh, barriers, scene, extra=None):
+    """Seam loops (mm) of a rastered seam: cell (i, j) at world point ``points_fn(i, j)`` is material
+    when inside the source, outside every other cut's gap (and ``extra(i, j)`` if given); cells are
+    grouped by their side of each other cut."""
+    labels = {}
     for i in range(nu):
-        base = cl.frame_at(u_lo + (i + 0.5) * step, 0.0)[0]
         for j in range(nv):
-            p = base + d * (v_lo + (j + 0.5) * step)
+            if extra is not None and not extra(i, j):
+                continue
+            p = points_fn(i, j)
             if not fit.is_inside(source_bvh, p):
                 continue
             label = []
@@ -126,6 +143,31 @@ def stroke_regions(spec, source_bvh, others, corners, scene):
     return regions
 
 
+def polygon_regions(spec, source_bvh, others, scene):
+    """Floor seam regions of a PolygonCut (loops in mm in the floor frame (u, v)); none without a floor."""
+    cutter = spec.cutter
+    if cutter.through:
+        return []
+    co, n, t = spec.co, spec.n, spec.t
+    b = n.cross(t)
+    us = [(cutter.frame.to3d(x, y, cutter.z_floor) - co).dot(t) for x, y in cutter.inner]
+    vs = [(cutter.frame.to3d(x, y, cutter.z_floor) - co).dot(b) for x, y in cutter.inner]
+    u_lo, u_hi, v_lo, v_hi = min(us), max(us), min(vs), max(vs)
+    step = max(math.sqrt(max(u_hi - u_lo, 1e-9) * max(v_hi - v_lo, 1e-9) / RASTER_SAMPLES),
+               units.mm_to_scene(RASTER_MIN_MM, scene))
+    nu = max(1, math.ceil((u_hi - u_lo) / step))
+    nv = max(1, math.ceil((v_hi - v_lo) / step))
+
+    def point(i, j):
+        return co + t * (u_lo + (i + 0.5) * step) + b * (v_lo + (j + 0.5) * step)
+
+    def in_floor(i, j):
+        return meshlib.point_in_poly_2d(cutter.frame.to2d(point(i, j)), cutter.inner)
+
+    return _raster_regions(point, nu, nv, u_lo, v_lo, step, source_bvh, [o.barrier() for o in others], scene,
+                           in_floor)
+
+
 def seam_regions_mm(context, obj, cut):
     """(regions, source_bvh) for ``cut``.
 
@@ -143,9 +185,19 @@ def seam_regions_mm(context, obj, cut):
         source_bvh = BVHTree.FromBMesh(bm)
     finally:
         bm.free()
-    if spec.kind == 'STROKE':
+    if spec.kind in RIBBON_KINDS:
         return stroke_regions(spec, source_bvh, others, build.world_corners(obj), scene), source_bvh
+    if spec.kind == 'POLYGON':
+        return polygon_regions(spec, source_bvh, others, scene), source_bvh
     return _plane_regions(context, obj, spec, others), source_bvh
+
+
+def through_polygon_message(spec):
+    """Why connectors cannot go on a polygon cut through the whole object ("" otherwise)."""
+    if spec.kind == 'POLYGON' and spec.cutter.through:
+        return (f"{spec.label} goes through the whole object, so its parts have no floor to join: "
+                "set a Depth to place connectors on the floor of the cut-out")
+    return ""
 
 
 def reach_mm(kind, width_mm, height_mm, snap_protrusion_mm=0.0):
@@ -184,12 +236,15 @@ def add_auto(context, obj, cut, kind=None, width_mm=5.0, height_mm=5.0, length_m
     inset = reach + clearance + MIN_WALL_MM
     spacing = 2.0 * (reach + clearance) + MIN_WALL_MM
     wall = units.mm_to_scene(MIN_WALL_MM, scene)
+    spec = build.cut_spec(obj, cut, scene)
+    no_floor = through_polygon_message(spec)
+    if no_floor:
+        raise build.BuildError(no_floor)
     regions, bvh = seam_regions_mm(context, obj, cut)
     stack = stack_api.get_stack(obj)
-    spec = build.cut_spec(obj, cut, scene)
     others = [s.barrier() for s in build.cut_specs(
         obj, [c for c in stack.cuts if c.enabled and c.uid != cut.uid], scene)]
-    own = spec.barrier() if spec.kind == 'STROKE' else None
+    own = spec.barrier() if spec.kind != 'PLANE' else None
     step = units.mm_to_scene(build.FIT_STEP_MM, scene)
     extra = {k: v for k, v in values.items() if k not in ("kind", "width_mm", "height_mm", "length_mm")}
 

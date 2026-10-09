@@ -11,9 +11,15 @@ live across modal events. In background mode the UI calls are skipped, but
 them to count the steps.
 """
 
+import contextlib
+
 import bpy
 
+from . import naming
+
 listeners = []
+# Progress instances between begin() and end() (their cursor progress owns the cursor)
+_running = []
 
 
 def _wm():
@@ -44,6 +50,7 @@ class Progress:
         if wm is not None and not bpy.app.background:
             wm.progress_begin(0, self.total)
         self.active = True
+        _running.append(self)
         self._notify()
 
     def set_total(self, total):
@@ -72,7 +79,37 @@ class Progress:
         if not self.active:
             return
         self.active = False
+        if self in _running:
+            _running.remove(self)
         wm = _wm()
         if wm is not None and not bpy.app.background:
             wm.progress_end()
         _status(None)
+
+
+@contextlib.contextmanager
+def busy(text):
+    """Wait cursor and status bar text around a slow computation outside a modal Build (e.g. the
+    first custom socket during Distribute or a click). Listeners get ``(0, 0, text)``."""
+    window = getattr(bpy.context, "window", None)
+    # Inside a running Build the cursor already shows its progress (and the step text stays)
+    ui = window is not None and not bpy.app.background and not _running
+    if ui:
+        try:
+            window.cursor_modal_set('WAIT')
+        except (AttributeError, RuntimeError, ReferenceError):
+            ui = False
+    if not _running:
+        _status(f"{naming.ADDON_NAME}: {text}...")
+    for fn in list(listeners):
+        fn(0, 0, text)
+    try:
+        yield
+    finally:
+        if ui:
+            try:
+                window.cursor_modal_restore()
+            except (AttributeError, RuntimeError, ReferenceError):
+                pass
+        if not _running:
+            _status(None)

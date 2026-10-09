@@ -2,7 +2,9 @@
 
 규칙
 - 각 항목은 독립적으로 체크 가능해야 한다. "검증" 줄의 명령을 그대로 실행하고 기대 출력과 비교한다.
-- 공통 명령: `BL45="/mnt/c/Program Files/Blender Foundation/Blender 4.5/blender.exe"`, `BL52="/mnt/c/Program Files/Blender Foundation/Blender 5.2/blender.exe"`. 테스트 실행은 `python3 tests/run_tests.py`(기본으로 두 버전 모두 실행, 모두 통과 시 exit 0).
+- 공통 명령: `BL45="/mnt/c/Program Files/Blender Foundation/Blender 4.5/blender.exe"`, `BL52="/mnt/c/Program Files/Blender Foundation/Blender 5.2/blender.exe"`. 테스트 실행은 `python3 tests/run_tests.py`.
+  **Phase 4부터 Blender 5.2 전용(사용자 결정 2026-10-10)**: 기본 실행은 5.2만, `--all-versions`로 4.5도 돌릴 수 있지만 지원 대상이 아니다.
+  Phase 0–3 항목의 "PASS 4.5/5.2" 기록은 당시 기준 그대로 둔다.
 - "GUI" 표시 항목은 headless 불가 → 사람이 Blender를 열어 확인하고 결과를 메모한다.
 - 각 Phase는 이전 Phase의 모든 자동 테스트가 계속 통과해야 완료다(회귀 금지).
 
@@ -320,17 +322,78 @@ MANIFOLD로 폴백(검증 통과, 조립 공차 0.24); 오류/경고 메시지 �
   간섭(밀어 넣는 경로 위) 검사, 소켓은 경로 전체 + 공차. 검증 아이디어: 큐브 Z 컷 + X 방향 레일 → 매니폴드, 단면이 사다리꼴(끝 넓음),
   B를 +X로 빼낼 수 있음(경로 위 관입 0), 경로를 막는 핀이 있으면 경고.
 
-## Phase 4 — Manual/Polygonal 컷, 검증 강화, 패키징
+## Phase 4 — Manual/Polygonal 컷, 검증 강화, 패키징 (feat/p4-final, 5.2 전용)
 
-- [ ] **P4-1 폴리라인 컷** `cuts/polyline.py` + `stack_add_polyline`(뷰포트 클릭 점 → 리본 커터, 2-2와 동일 규약).
-  검증: `test_polyline_cutter.py` — 점 4개 → 커터 매니폴드, 빌드 파트 2개 매니폴드. PASS. GUI 절차 `docs/MANUAL_QA.md` 갱신.
-- [ ] **P4-2 폴리곤 영역 제거** `cuts/polygon.py`(폐다각형 → 프리즘 커터, 영역 안을 별도 파트로 분리).
-  검증: `test_polygon_cut.py` — 큐브 윗면에 사각형 영역 → 파트 2개(본체, 영역 조각), 부피 합 = 원본(허용 2%), 매니폴드. PASS.
-- [ ] **P4-3 검증 패널 + Fix**: `validate`/`fix_transforms`/`fix_units` 오퍼레이터, 패널 상단 상태 아이콘.
-  검증: `test_validate_ops.py` — scale 2 큐브에 `fix_transforms` → scale (1,1,1), 치수 동일; m 씬에 `fix_units` → `length_unit=='MILLIMETERS'`, `scale_length==0.001`. PASS.
-- [ ] **P4-4 compat 검증 매트릭스**: 4.4·4.5·5.2에서 전체 테스트, (가능하면) 4.2 LTS 설치 후 실행.
-  검증: `python3 tests/run_tests.py --blender "$BL44" --blender "$BL45" --blender "$BL52"` exit 0. 결과 표를 `docs/COMPAT.md`에 기록.
-- [ ] **P4-5 패키징**: `blender_manifest.toml` 버전 0.3.0, `blender --command extension build` 성공, zip 설치 테스트.
-  검증: `"$BL52" --command extension build --source-dir snapsplit --output-dir dist` → `dist/snapsplit-0.3.0.zip` 생성; `"$BL52" --command extension validate snapsplit` 경고 0. headless에서 zip을 `package_install_files`로 설치 후 `test_register` PASS.
-- [ ] **P4-6 문서**: README(한/영) 사용법·스크린샷·제한사항, CHANGELOG.
-  검증: README에 Draft/Easy, 컷 4종, 커넥터, Export, 검증 섹션 존재(`grep -c "^## " README.md` ≥ 6).
+- [x] **P4-0 (P3 검증 후속) D19 커스텀 소켓 속도**: 볼록한 핀 = 정점 ⊕ 공 꼭짓점의 볼록 껍질(정확한 민코프스키 합, 불리언 없음);
+  오목 핀은 정점 법선 오프셋 → 안 되면 면별 볼록 껍질(면 정점 ⊕ 공)을 핀과 한 번 합집합(이전: 면 프리즘 + 모서리 원기둥 + 꼭짓점 구).
+  캐시는 표준 프레임(핀 쪽·갭·삽입 깊이와 무관, 강체 이동)이라 양쪽 핀 쪽·Distribute·재빌드가 한 번 계산을 공유. 느린 경로는
+  대기 커서 + 상태 텍스트(`progress.busy`, 모달 Build 중에는 Build 진행 표시 유지). 오브젝트/파일 저장 캐시는 만들지 않음(PLAN 9).
+  측정(5.2, 6×6×10 mm, c 0.25): 소켓 1개 — 17면 원뿔 17.4 s → 0.01 s, 뒤집은 원뿔 18.0 s → 0.01 s(이전엔 민코프스키 합치기 실패로 86 %
+  공차 경고), 별 3.4 s → 1.9 s; Z 컷 큐브에서 Distribute(2개) + 첫 Build — 원뿔 41.7 + 0.57 s → 0.04 + 0.04 s, 뒤집은 원뿔 40.3 + 0.53 s →
+  0.05 + 0.04 s, 별 7.0 + 0.52 s → 1.90 + 0.04 s. 조립 여유 0.240 → 0.250(c).
+  **낮음(EXACT_SELF→MANIFOLD 폴백) 원인**: 이전 합 소켓에 면적 0 삼각형·길이 0 모서리가 수백 개(원뿔 559/371, 별 562/445: 접하는 구·원기둥의
+  합집합 찌꺼기) → 파트 DIFFERENCE에서 EXACT_SELF 결과가 비매니폴드. 새 소켓은 원뿔 0개, 별 11개(1e-6 미만) → 별·원뿔 모두 평범한 EXACT.
+  검증: `test_custom_socket.py`(모든 불리언 EXACT, 원뿔 < 1 s·별 < 6 s, 세 가지 핀 쪽/갭/깊이에 캐시 1개, 원뿔은 busy 없음·별은 1번,
+  옮긴 소켓이 옮긴 핀을 ≥ 0.9c로 감쌈). 뮤테이션: 볼록 경로 끔, 비표준 캐시 키 → 검출.
+- [x] **P4-0b (P1부터) Export 폴더 예외**: `os.makedirs` 실패와 파일 쓰기 실패를 경로를 밝힌 ERROR 보고로(트레이스백 없음, CANCELLED).
+  검증: `test_export.py`(파일 아래 폴더 → "Cannot create the export folder …", 같은 이름 폴더가 막은 STL → "Could not write …"). 뮤테이션 검출.
+- [x] **P4-1 폴리라인 컷** `cuts/polyline.py` + `splitforge.stack_add_polyline`: 클릭한 점 그대로(스무딩·리샘플 없음)의 리본 컷(스트로크와
+  같은 커터·갭·거부 규칙, 메시지는 "polyline"), 커넥터 프레임은 구간 방향(`Centerline(sharp=True)`, 핀이 구간 면에 수직), 꼭짓점 위 커넥터는
+  Build가 "bends into"로 건너뜀. 모달: LMB 점 추가(첫 클릭의 뷰 방향 고정, 뷰를 돌려도 같은 평면), Ctrl = 화면 15° 단위,
+  Backspace/Delete/Ctrl+Z 마지막 점 삭제, Enter/Space 확정, Esc/RMB 취소, 고무줄 선 + 커터 윤곽 프리뷰(평범한 데이터), `replace_uid`, `easy`.
+  검증: `test_polyline_cutter.py`(점 4개 그대로 저장, 두 제거 솔리드 매니폴드, 리본이 구간 위, 2파트 매니폴드·A+B = 큐브 − 갭 슬랩 0.5 %,
+  Distribute 2개 축 ⟂ 구간, 경고 0·핀 +/소켓 −, 꼭짓점 커넥터 건너뜀, 점 2개 = 평면 컷(1e-4), 거부 3종, 오브젝트 이동 시 따라감,
+  다시 그리기 uid·커넥터 유지, Easy 한 번에, undo), `test_points_modal.py`(스탠드인: 클릭 위치·고무줄·Backspace/Ctrl+Z·undo 중 안전·Enter·
+  15° 스냅·궤도 회전 후에도 첫 평면·거부 이유·Esc/RMB 흔적 없음·두 번째 모달 거부·redraw·오브젝트 사라짐·`cancel()`), GUI `p4_points`.
+- [x] **P4-2 폴리곤 컷(영역 도려내기)** `cuts/polygon.py` + `splitforge.stack_add_polygon`: 닫힌 다각형(반시계 정규화, 자기 교차·면적 0·
+  갭에 비해 좁음 거부) → A = 조각 ∩ 안쪽 오프셋 프리즘(INTERSECT), B = 조각 − 바깥 오프셋 프리즘, 같은 쌍 부피 검사(A + B + 벽 갭 = 조각).
+  프리즘은 물체 앞(뷰 쪽)에서 시작해 **Depth**(mm, 물체 bbox 앞면 기준)의 바닥 또는 관통(0). 커넥터는 바닥 평면(법선 −d = 플러그 쪽)에만,
+  Distribute는 바닥 ∩ 안쪽 다각형을 래스터, fit은 폴리곤 프리즘을 RibbonBarrier(정확한 안/밖 판정)로 — 자기 시임(own)과 다른 컷의 장벽 모두.
+  관통 폴리곤은 Distribute/Click이 "set a Depth" 오류, Easy는 커넥터 없이 빌드. 클릭 모달은 첫 점 클릭(12 px)으로 닫힘.
+  검증: `test_polygon_cut.py` — 깊이 10 사각형: 플러그 4000 / 몸체 60000(1e-4, 합 = 64000), 플러그 z 10..20, 원본 해시 불변; 바닥 커넥터 2개
+  (z = 10, 축 +Z, 벽에서 ≥ 0.4 mm), 경고 0, 핀 +/소켓 −, 핀이 벽 안; 관통 + 갭 0.4: 기둥 19.6²×40·링 64000 − 20.4²×40(0.5 %), 쌍 검사 첫
+  EXACT 통과; L자 오목 플러그; Z 평면 + 깊이 30 폴리곤: 평면 커넥터 21개 모두 폴리곤 벽에서 ≥ 0.4 mm(플러그 안 9개), 4파트; 거부 5종
+  (점 2개, 교차, 물체 밖, 물체 전체 둘러쌈, 갭에 비해 좁음), 패널 문제 표시, Easy 도려내기(깊이 12 + 커넥터 2), Easy 관통(커넥터 0), undo.
+  (원안의 "큐브 윗면 사각형 → 파트 2개, 부피 합 = 원본 2 %"를 포함.) 눈 있는 Suzanne(Accurate/Fast) 폴리곤 + 폴리라인 프로브: 매니폴드, 폴백 0.
+- [x] **P4-3 검증 패널 + Fix**: `core/validate.py`가 열린 모서리(구멍)·3면 이상 모서리·떨어진 요소·뒤집힌 법선(같은 방향으로 지나는 모서리)·
+  안팎 뒤집힘(음의 부피)·중복 정점(0.001 mm, KDTree)·변환·단위를 보고, 마지막 Check Mesh 결과를 메시 지문별로 보관(패널이 재스캔하지 않음).
+  패널 맨 위 "Print checks": 실패한 행에만 Fix. `ops/ops_fix.py` — `fix_transforms`(회전·스케일을 메시에 적용, 컷 스택(원점·법선·접선·점·방향)을
+  같은 행렬로 변환해 월드 위치 유지, 음수 스케일은 법선 뒤집기, 자식은 월드 유지, 공유 메시는 거부), `fix_units`(Metric·Millimeters·0.001;
+  Keep Units 기본 / Keep Size = 씬 오브젝트 스케일, 대화상자), `fix_normals`, `fix_merge`(거리 mm), `fix_holes`(구멍 채움 + 떨어진 요소 삭제,
+  3면 모서리는 남기고 보고). 모두 REGISTER|UNDO, 바꾼 내용 보고, 할 일이 없으면 CANCELLED, 메시 Fix 뒤 Check Mesh 다시 실행.
+  검증: `test_validate_ops.py`(스케일 2·회전 30° 큐브 + Z 컷 + 스트로크 + 커넥터: 적용 후 크기·부피 그대로, 컷 월드 위치·스트로크 점 1e-4,
+  자식 월드 유지, Build 파트 부피 동일, undo 복원; 음수 스케일 법선; 공유 메시 오류; 미터 씬 Keep Units/Keep Size/undo/이미 mm;
+  면 2개 뒤집힘·안팎 뒤집힘 → 수정·undo; 모서리 분리 큐브 24 → 8 정점; 면 없음 + 떨어진 정점 → 닫힘·부피 8000; 3면 모서리 남음;
+  패널 행: Fix는 실패 행에만, 메시 바뀌면 "Mesh not checked yet"), GUI `p4_fix`. 뮤테이션: 컷 미변환·법선 뒤집기 없음·Keep Size 끔·
+  뒤집힌 법선 미검출·오래된 보고 표시 → 검출.
+- [x] **P4-4 (변경) 호환 매트릭스 → Blender 5.2 전용**(사용자 결정 2026-10-10): 원안의 4.2/4.4/4.5/5.2 매트릭스와 `docs/COMPAT.md` 대신
+  manifest·bl_info 최소 5.2.0, `run_tests.py` 기본 5.2(`--all-versions`로 4.5 선택 실행, 지원 주장 안 함), 4.x 전용 호환 코드(FAST/FLOAT 솔버
+  이름 분기, MANIFOLD 유무 검사, 미사용 `boolean_solver_order`) 삭제 — 헤드리스 전체·GUI 전체 PASS로 확인. README "Blender version".
+- [x] **P4-5 패키징**: 버전 **0.4.0**(PLAN 9), manifest `[build] paths_exclude_pattern`(pycache·pyc·.git·blend1·OS 파일), 패키지 README 새로 씀,
+  `.gitignore`에 `/dist/`. 검증: `"$BL52" --command extension validate splitforge` 성공, `extension build --source-dir splitforge --output-dir dist` →
+  `dist/splitforge-0.4.0.zip`(44파일, tests·pycache 없음, LICENCE.txt·README.md 포함, ~154 KB); `python3 tests/run_tests.py --zip
+  dist/splitforge-0.4.0.zip`가 zip을 `package_install_files`(enable on install)로 설치해 연산자·패널 등록, Build 2파트 매니폴드,
+  disable/enable 확인 + 헤드리스 케이스를 zip 내용으로 실행.
+- [x] **P4-6 문서**: README(사용자 가이드: 설치, 단위, 검사·Fix, Draft/Easy, 컷 4종, 커넥터(커스텀·도웰 배치), 품질 설정, Export, 제한, 버전,
+  빌드, 한국어 빠른 안내, 크레딧), CHANGELOG.md, PLAN(5.2 결정·모듈·결정 9), MANUAL_QA(QA-11·QA-12·자동화 표). 새 UI 문자열 de/ko 라벨 +
+  한국어 툴팁(`test_i18n`: 문자열 154·툴팁 121, `tr()` 템플릿과 검사 행도 스캔, 한국어 그리기 "폴리라인: 점 3개").
+- 백로그 B-1(슬라이딩 도브테일 레일)은 그대로 보류.
+
+### Phase 4 결과 (feat/p4-final)
+
+결과(2026-10-10, feat/p4-final, Blender 5.2.2 LTS만): 헤드리스 **43/43 PASS**(새 케이스 5개: test_polyline_cutter, test_polygon_cut,
+test_points_modal, test_validate_ops + 확장된 기존 케이스), `--zip dist/splitforge-0.4.0.zip`로 zip 내용에서 43/43 + 설치 검사 PASS,
+`--gui` **8개 시나리오 전체 PASS**(p1_adjust_plane 26.5 s, p1_panel 187.1 s, p2_stroke 47.7 s, p2_build_progress 49.0 s,
+p3_connector_click 21.7 s, p3_connector_types 10.0 s, **p4_points 36.1 s**(40 검사), **p4_fix 128.0 s**(11 검사)).
+스크린샷: 폴리라인 프리뷰 [비스듬히](qa/p4_polyline_oblique_5.2.png), 폴리곤 [위에서](qa/p4_polygon_preview_5.2.png),
+[빌드 분리](qa/p4_built_apart_5.2.png)(플러그 들어 올림, 아래 폴리라인 시임), 검사 [발견](qa/p4_fix_checks_found_5.2.png)
+[수정 후](qa/p4_fix_checks_fixed_5.2.png).
+- `--slow test_perf_large`(514 560면): 평면 **Auto 13.68 s / Accurate 50.01 s**, 타입 Auto 14.02 s / Accurate 44.99 s, S자 Auto 9.07 s /
+  Accurate 46.30 s, **새 폴리라인 + 폴리곤(깊이 15, 갭 0.3) Auto 11.61 s(MANIFOLD×4) / Accurate 50.01 s(EXACT×4, 각 1.1–2.2 s + 셸 합치기)**,
+  폴리곤 추가 0.19 s. 상한 120 s 모두 통과. (같은 날 첫 실행의 평면 Accurate는 64.35 s — 불리언 4개 합 3.4 s, 나머지는 셸 합치기의
+  실행 간 편차; 코드 경로 불변.)
+- 뮤테이션 21건 중 처음 19건에서 17건 검출, 미검출 2건(폴리곤 갭 부피 무시 — VOXEL의 느슨한 허용치로 통과; 첫 클릭 뷰 방향 고정 해제 —
+  궤도 회전 시나리오 없음)은 테스트 보강 후 검출 → 21/21.
+- 편차·결정: P4-4 매트릭스 → 5.2 전용(사용자 결정); 버전 0.4.0; 폴리곤 커넥터는 바닥에만; 소켓 캐시 영속화 안 함(PLAN 9);
+  원안의 `cuts/polyline.py` 커터는 스트로크 커터 재사용(파일은 규칙·화면 헬퍼); 원안의 `fix_transforms`/`fix_units` 외에 법선·병합·구멍 Fix 추가.
+- 남은 것(사람 확인): 실제 장치에서 점 찍기 감각, 프리뷰 가독성, Fix 대화상자 문구, 실제 출력 끼움(커스텀 소켓 0.25 mm), 한국어 툴팁 문구.

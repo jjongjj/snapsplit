@@ -97,11 +97,25 @@ def ui_strings(ctx):
             out.add(("*", getattr(bpy.types, name).bl_label))
     panel = ctx.module("ui.panel")
     tree = ast.parse(open(panel.__file__, encoding="utf-8").read())
+    def constants(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [node.value]
+        if isinstance(node, ast.IfExp):
+            return constants(node.body) + constants(node.orelse)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "tr" and node.args:
+            return constants(node.args[0])
+        return []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("label", "operator", "prop"):
             for kw in node.keywords:
                 if kw.arg == "text" and isinstance(kw.value, ast.Constant) and len(kw.value.value) > 1:
                     out.add(("*", kw.value.value))
+        # value templates (tr("... {n} ...")) and the print-check rows (_check_row(col, ok, text, ...))
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "tr" and node.args:
+            out.update(("*", t) for t in constants(node.args[0]))
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_check_row" and len(node.args) > 2:
+            out.update(("*", t) for t in constants(node.args[2]))
+    out.update(("*", label) for label, _icon, _op in panel.POINT_CUT_UI.values())
     out.update(("*", s) for s in panel.KIND_SHORT.values())
     out.update({("*", "pin"), ("*", "both sides")})
     # Untranslatable on purpose: single letters / units shown as they are
@@ -160,6 +174,8 @@ def run(ctx):
     lib.select_only([cube])
     bpy.ops.splitforge.stack_add_plane(axis='Z')
     bpy.ops.splitforge.connector_add_auto()
+    bpy.ops.splitforge.stack_add_polyline(points=[{"name": "", "co": (x, 0.0, -6.0)} for x in (-30.0, 0.0, 30.0)],
+                                          direction=(0.0, 1.0, 0.0))
     bpy.ops.splitforge.stack_add_stroke(points=[{"name": "", "co": (x, 0.0, 6.0)} for x in (-30.0, 30.0)],
                                         direction=(0.0, 1.0, 0.0))
     view = bpy.context.preferences.view
@@ -173,6 +189,9 @@ def run(ctx):
         button = bpy.app.translations.pgettext_iface("Distribute", "Operator")
         tip = bpy.app.translations.pgettext_tip("Where Build puts the separate dowel parts")
         drawn = [e[1] for e in test_ui_draw._draw_all("ko") if e[0] == "label"]
+        cube.splitforge_stack.active_index = 1
+        drawn += [e[1] for e in test_ui_draw._draw_all("ko polyline") if e[0] == "label"]
+        cube.splitforge_stack.active_index = 2
         bpy.ops.splitforge.build()
         drawn += [e[1] for e in test_ui_draw._draw_all("ko built") if e[0] == "label"]
     finally:
@@ -181,7 +200,7 @@ def run(ctx):
     assert op == "커넥터 배치", op
     assert button == "자동 배치", button
     assert tip == "빌드가 별도 도웰 파트를 놓을 위치", tip
-    for text in ("틈 0 mm, 커넥터 0개", "Stroke 2에 배치", "1 단위 = 1 mm", "KoCube의 파트",
-                 "스트로크: 점 2개", "SplitForge_Build_KoCube에 파트 3개"):
+    for text in ("틈 0 mm, 커넥터 0개", "Stroke 3에 배치", "1 단위 = 1 mm", "KoCube의 파트",
+                 "스트로크: 점 2개", "폴리라인: 점 3개", "SplitForge_Build_KoCube에 파트 4개"):
         assert text in drawn, (text, drawn)
     ctx.metric("ko_labels", [t for t in drawn if "KoCube" in t or "mm" in t][:4])

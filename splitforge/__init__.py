@@ -25,8 +25,8 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 bl_info = {
     "name": "SplitForge",
     "author": "SplitForge contributors; SnapSplit by Christoph Medicus",
-    "version": (0, 3, 0),
-    "blender": (4, 2, 0),
+    "version": (0, 4, 0),
+    "blender": (5, 2, 0),
     "location": "View3D > N-Panel > SplitForge",
     "description": (
         "Non-destructive cut stacks and connectors for 3D printing (fork of SnapSplit)."
@@ -47,8 +47,8 @@ from .core.naming import ADDON_NAME
 from . import localization  # translation data (DICTIONARY), no register() of its own
 from . import prefs
 from .model import props as model_props
-from .ops import (ops_stack, ops_cut_plane, ops_cut_stroke, ops_connector, ops_connector_click, ops_build,
-                  ops_export)
+from .ops import (ops_stack, ops_cut_plane, ops_cut_stroke, ops_cut_points, ops_connector, ops_connector_click,
+                  ops_build, ops_export, ops_fix)
 from .ui import overlay as ui_overlay
 from .ui import panel as ui_panel
 
@@ -62,10 +62,12 @@ _modules = [
     ops_stack,
     ops_cut_plane,
     ops_cut_stroke,
+    ops_cut_points,
     ops_connector,
     ops_connector_click,
     ops_build,
     ops_export,
+    ops_fix,
     ui_overlay,
     ui_panel,
 ]

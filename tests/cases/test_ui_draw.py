@@ -162,8 +162,34 @@ def run(ctx):
     fills, lines = overlay.geometry(bpy.context)
     assert len(fills) == 3 and len(lines) == 3 + n_conn + len(stroke_cut.connectors), (len(fills), len(lines))
 
+    # Polyline and polygon cuts: their own label, Redraw operator, Depth (polygon), overlay
+    lib.run_op(bpy.ops.splitforge.stack_add_polyline, direction=(0.0, 1.0, 0.0),
+               points=[{"name": "", "co": co} for co in ((-30.0, 0.0, -8.0), (0.0, 0.0, -2.0), (30.0, 0.0, -8.0))])
+    log = _draw_all("polyline")
+    assert ("operator", "splitforge.stack_add_polyline") in log and ("prop", "depth_mm") not in log, log
+    assert any(e[0] == "label" and e[1] == "Polyline: 3 points" for e in log), log
+    tris, segs, matrix_fn = overlay.stroke_ribbon(cube, cube.splitforge_stack.cuts[-1])
+    assert len(tris) == 6 * 2 and matrix_fn is not None
+    lib.run_op(bpy.ops.splitforge.stack_add_polygon, direction=(0.0, 0.0, -1.0), depth_mm=6.0,
+               points=[{"name": "", "co": co} for co in ((-8.0, -8.0, 30.0), (8.0, -8.0, 30.0), (0.0, 9.0, 30.0))])
+    log = _draw_all("polygon")
+    assert ("prop", "depth_mm") in log and any(e[0] == "label" and e[1] == "Polygon: 3 corners" for e in log), log
+    poly = cube.splitforge_stack.cuts[-1]
+    tris, segs, matrix_fn = overlay.polygon_prism(cube, poly, 1.0)
+    assert len(tris) == 6 * 3 and len(segs) == 2 * 3 * 2 + 2 * 3 and matrix_fn is not None
+    assert abs(matrix_fn(0.0, 0.0, 0.0).translation.z - 14.0) < 1e-4, "connectors on the floor (20 - 6)"
+    poly.depth_mm = 0.0
+    assert overlay.polygon_prism(cube, poly, 1.0)[2] is None, "no floor, no connector frame"
+    log = _draw_all("polygon through")
+    assert ("label", "Polygon through the object: set a Depth for connectors on its floor") in log, log
+    poly.depth_mm = 6.0
+    fills, lines = overlay.geometry(bpy.context)
+    assert len(fills) == 5, len(fills)
+
     cube.splitforge_stack.mode = 'EASY'
     log = _draw_all("easy")
+    assert ("operator", "splitforge.stack_add_polyline") in log and ("operator", "splitforge.stack_add_polygon") in log
+    assert ("prop", "easy_depth_mm") in log
     assert ("operator", "splitforge.easy_cut") in log and ("hidden", "SPLITFORGE_PT_connectors") in log
     assert ("prop", "easy_gap_mm") in log and log.count(("operator", "splitforge.stack_add_stroke")) == 1
 

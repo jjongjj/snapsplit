@@ -1,7 +1,8 @@
 # SnapSplit 포크 → "Cut & Connect for 3D printing" 애드온 발전 계획
 
 작성일: 2026-10-09 / 기준: `master` (v0.1.9), `upstream/V_0.2.0_freehand` (v0.2.0)
-Blender 대상: 4.2 LTS ~ 5.x (검증 환경: 4.5.5 LTS, 5.2.2 LTS, Windows exe를 WSL에서 headless 호출)
+Blender 대상: ~~4.2 LTS ~ 5.x~~ → **Blender 5.2 전용**(사용자 결정 2026-10-10, Phase 4; manifest `blender_version_min = "5.2.0"`).
+검증 환경: 5.2.2 LTS(Windows exe를 WSL에서 headless/GUI 호출). Phase 3까지는 4.5.5 LTS도 함께 검증했다.
 
 > **식별자 결정(2026-10-09, 사용자)**: 포크의 extension id는 `splitforge`, 표시 이름은 "SplitForge"(임시 작업명).
 > 이름은 `splitforge/core/naming.py` 한 곳(+ `blender_manifest.toml`의 `id`/`name`, 패키지 폴더 이름)에 모여 있다.
@@ -119,8 +120,8 @@ splitforge/                   # (Phase 0까지 snapsplit/)
   cuts/
     plane.py                  # 평면 커터(origin/normal) 생성·프리뷰 데이터
     stroke.py                 # 스트로크 → 리본 → 솔리드 커터(곡선 컷)
-    polyline.py               # 수동 점 입력 커터
-    polygon.py                # 폴리곤 영역 제거 커터
+    polyline.py               # (Phase 4) 수동 점 입력: 스트로크 리본 규칙 + 날카로운 시임 프레임, 클릭 모달용 화면 헬퍼
+    polygon.py                # (Phase 4) 폴리곤 도려내기: A = 조각 ∩ 안쪽 프리즘, B = 조각 − 바깥 프리즘, 깊이(바닥) 선택
     build.py                  # Build 파이프라인: 원본 복사 → 컷 순차 적용 → 캡 → 커넥터 → 컬렉션
   connectors/
     shapes.py                 # (Phase 3) 커넥터 = 솔리드 목록(Loft: ROUND/RECT 단면 스윕, Ball, MeshSolid). Build와 fit 검사가 같은 솔리드를 씀
@@ -133,7 +134,8 @@ splitforge/                   # (Phase 0까지 snapsplit/)
     ops_connector.py          # 커넥터 추가/자동 배치/삭제/커스텀 크기
     ops_connector_click.py    # (Phase 3) 클릭 배치 모달
     ops_export.py             # 일괄 STL/OBJ/FBX
-    ops_validate.py
+    ops_cut_points.py         # (Phase 4) 폴리라인/폴리곤 클릭 모달
+    ops_fix.py                # (Phase 4) 검증 Fix: 변환 적용(스택 유지), 단위, 법선, 거리 병합, 구멍 채우기
   ui/
     panel.py (패널 + UIList), overlay.py (gpu 오버레이 프리뷰), legacy.py (레거시 패널, 구 ui.py)
   (legacy ops_split/ops_connectors/ops_align/ops_freehand/seam_data/profiles/utils.py, ui/legacy.py: Phase 3에서 삭제)
@@ -202,7 +204,8 @@ class SNAP_PG_CutStack(PropertyGroup):
 | | `snapsplit.build` | Draft 빌드(Build 파이프라인). `rebuild=True`면 기존 결과 교체 |
 | | `snapsplit.easy_cut` | Easy 모드: 컷 1개 + 기본 커넥터 → 즉시 빌드 |
 | 커넥터 | `splitforge.connector_add_auto` (LINE/GRID), `connector_add`, `connector_add_click`(모달, 클릭마다 `undo_push`), `connector_remove`, `connector_custom_size` | (Phase 3) `connector_mirror_side`는 만들지 않음: 커넥터별 Pin side로 충분 |
-| 검증/출력 | `snapsplit.validate`, `snapsplit.fix_transforms`, `snapsplit.fix_units`, `snapsplit.export_parts` (STL/OBJ/FBX, 파트별 파일) | |
+| 검증/출력 | `splitforge.validate`, `fix_transforms`, `fix_units`, `fix_normals`, `fix_merge`, `fix_holes`, `export_parts` (STL/OBJ/FBX, 파트별 파일) | (Phase 4) Fix는 각각 undo 1단계, 바꾼 내용 보고 |
+| (Phase 4) 점 컷 | `splitforge.stack_add_polyline`, `stack_add_polygon` | 클릭 모달(Ctrl 15°, Backspace/Ctrl+Z 마지막 점 삭제, 첫 점 클릭으로 폴리곤 닫기), `replace_uid`, `easy`, 폴리곤 `depth_mm` |
 | 레거시 | 기존 `planar_split`, `add_connectors`, `place_connectors_click`, `freehand_cut`, `align_faces`… | Phase 3에서 삭제(위 상단 결정) |
 
 ### 4.4 불리언 파이프라인 (`core/boolean.py`) — Phase 2 구현
@@ -246,9 +249,11 @@ c/cos(경사), 스냅 딤플은 반지름 +c, 커스텀 메시는 정점 법선 
 밀어 넣는 레일)은 이관하지 않음 — 법선 방향 조립이 불가능하고 원본 밖으로 나가는 형상이라 fit 검사와 맞지 않는다.
 → **사용자 결정(2026-10-10)**: 나중에 — 백로그 "슬라이딩 도브테일 레일"(CHECKLIST 백로그 B-1).
 
-커스텀 소켓(D17 수정, `connectors/custom_socket.py`): 정점 법선 오프셋이 깨끗이 합쳐지고 핀 표면 샘플에서 ≥ 0.9 × 공차를 지키면 그것,
-아니면 민코프스키 합(핀 ∪ 면 프리즘 ∪ 모서리 원기둥 ∪ 꼭짓점 구, 다각형은 내접 반지름 = 공차)을 한 번 합집합(삼각형 ≤ 4000), 결과를
-형상·크기·공차별로 캐시. 그래도 모자라면 Build 경고("keeps only N % of the clearance … simplify the custom mesh").
+커스텀 소켓(D17 수정 → D19 개선, `connectors/custom_socket.py`): (1) 볼록한 핀은 모든 정점 + 공 꼭짓점(면이 중심에서 ≥ 공차인
+이코스피어, 세분 3)의 볼록 껍질 = 정확한 민코프스키 합(불리언 없음, ms 단위); (2) 아니면 정점 법선 오프셋이 깨끗이 합쳐지고 핀 표면
+샘플에서 ≥ 0.9 × 공차면 그것; (3) 아니면 핀 ∪ 면마다(볼록 다각형, 오목·비평면은 삼각형) 면 정점 ⊕ 공의 볼록 껍질을 한 번 합집합
+(삼각형 ≤ 4000, 대기 커서 + 상태 텍스트). 결과는 표준 프레임(밑면 z = 0, 핀 쪽 +1)에서 형상·크기·공차별로 캐시하고 강체 이동
+(다른 핀 쪽 = X축 180° 회전, 갭·삽입 깊이 = Z 이동) — 양쪽 핀 쪽·Distribute 검사·재빌드가 한 번 계산을 공유. 그래도 모자라면 Build 경고.
 
 도웰 배치(사용자 결정 2026-10-10): Settings > Dowel layout — Flat(기본, 위 배치), Upright(같은 줄에 세움, 원본 최저 Z에),
 At assembly position(소켓 안 미리보기). 세 자세를 파트에 저장해 설정을 바꾸면 다시 빌드하지 않고 옮겨짐. Export는 출력 자세
@@ -267,9 +272,9 @@ At assembly position(소켓 안 미리보기). 세 자세를 파트에 저장해
 
 ### 4.6 UI 레이아웃 (N 패널 "SplitForge")
 
-1. **Validate** 박스: 매니폴드/변환/단위 상태 아이콘 + Fix 버튼.
+1. **Print checks** 박스(Phase 4): Check Mesh + 행마다 상태 아이콘(변환, 1 unit = … mm, 구멍/떨어진 요소, 법선, 중복 정점, 3면 모서리) + 실패 행에만 Fix.
 2. **Mode**: Draft | Easy 토글.
-3. **Cuts** (Draft): `UIList`(이름, 종류 아이콘, 활성 체크, 이동 ▲▼) + 추가 버튼 행(Plane/Stroke/Polyline/Polygon) + 선택 항목 속성(평면 조정, gap, cap).
+3. **Cuts** (Draft): `UIList`(이름, 활성 체크, 문제 아이콘, 이동 ▲▼) + 추가 버튼 열(X/Y/Z, Stroke, Polyline, Polygon) + 선택 항목 속성(평면: 원점·법선·조정; 점 컷: gap, 폴리곤 Depth, 문제, Redraw).
 4. **Connectors**(선택된 컷): `UIList` + 자동 배치(분포/개수/마진) + 클릭 배치 + 선택 커넥터 속성(타입, 크기, 회전, 핀 측, 클리어런스, 커스텀 메시, 양면).
 5. **Build / Export**: Build, Rebuild, 결과 컬렉션 표시, Export(포맷·폴더).
 6. **Settings**(접힘): 재질 프로필/공차, 솔버, voxel 폴백, 디버그 로그.
@@ -293,7 +298,7 @@ Distribute / Click / + / −, 커넥터 목록, 활성 커넥터 상자(종류�
 | 1 (MVP) | 평면 컷 스택 + Build + 핀/소켓 레코드 + Export | `core/`, `model/`, `cuts/plane.py`, `cuts/build.py`, `connectors/*`, `ops/`, 새 패널 |
 | 2 | 곡선 컷(스트로크) + 불리언 폴백/진행률 | `cuts/stroke.py`, `core/boolean.py` 완성, `core/progress.py` |
 | 3 | 커넥터 고도화(전 타입, 커스텀, 양면 도웰, 편집 gizmo) + 레거시 제거 | `connectors/*` 완성, legacy 삭제, 로컬라이즈 |
-| 4 | Manual/Polygonal 컷, 검증 강화, 패키징·배포 | `cuts/polyline.py`, `cuts/polygon.py`, 4.2 호환 검증, 확장 zip |
+| 4 | Manual/Polygonal 컷, 검증 강화, 패키징·배포 | `cuts/polyline.py`, `cuts/polygon.py`, 검증 Fix(`ops/ops_fix.py`), D19 커스텀 소켓 속도, 5.2 전용(4.x 호환 매트릭스 대신), 확장 zip 0.4.0 |
 
 세부 태스크·수락 기준은 `docs/CHECKLIST.md`.
 
@@ -314,7 +319,8 @@ Distribute / Click / + / −, 커넥터 목록, 활성 커넥터 상자(종류�
 
 1. 베이스 브랜치: 제안대로 `upstream/V_0.2.0_freehand`에서 `develop` 분기 승인 여부(대안: master + 필요 시 cherry-pick).
 2. ~~제품 식별자~~ → **결정됨**: `id="splitforge"`, 이름 "SplitForge"(임시, `core/naming.py`로 중앙화). 문서 상단 참고.
-3. 최소 지원 버전: manifest 4.2 유지하되 자동 검증은 4.4/4.5/5.2만 할지, 4.2 LTS를 설치해 검증 대상에 넣을지.
+3. ~~최소 지원 버전~~ → **결정됨(2026-10-10, 사용자)**: Blender 5.2 전용. manifest/bl_info 최소 5.2.0, `tests/run_tests.py` 기본 5.2
+   (`--all-versions`로 4.5 선택 실행, 지원 주장 안 함). 4.x 전용 호환 코드(FAST/FLOAT 솔버 이름, MANIFOLD 유무 검사)는 삭제.
 4. ~~레거시 공개 유지 기간~~ → **결정됨**: Phase 3까지 유지, 새 메인 패널 아래 접힌 "Legacy" 서브패널.
 5. ~~곡선 컷 방식~~ → **결정됨(2026-10-09)**: 뷰 투영 리본(그린 스트로크를 뷰 방향으로 압출, 레코드는 뷰와 무관한 로컬 폴리라인 + 방향). 4.4절.
 6. ~~양면 도웰의 도웰 본체~~ → **결정됨(사용자)**: 도웰은 별도 출력용 파트(결과 컬렉션, Export 포함). 배치는 옵션(2026-10-10):
@@ -327,3 +333,10 @@ Distribute / Click / + / −, 커넥터 목록, 활성 커넥터 상자(종류�
    (각 셸이 따로 잘림, 슬라이서가 합침), Accurate(EXACT_SELF)는 하나의 솔리드로 합친다. Build 정보 줄에 사용한 솔버
    ("Booleans (Auto): 2x MANIFOLD, …; fallbacks: …"). 51만 면 실측(5.2): 평면 Build Auto 14.4 s / Accurate 60.5 s, S자 Build Auto 6.2 s / Accurate 86.7 s.
    (D14 수정 후) Accurate는 Build 시작에 교차 셸을 한 번 합친 뒤 깨끗한 입력에 EXACT — 수치는 CHECKLIST "Phase 2 검증 3차 후속".
+9. Phase 4 구현 결정(구현자, 사용자 확인 대상 — CHECKLIST "Phase 4 결과"):
+   - 릴리스 버전 **0.4.0**(1.0.0-rc 아님): 기능은 다 갖췄지만 실제 출력 끼움·한국어 툴팁 문구 등 사람 확인이 남아 있음.
+   - 폴리라인 = 점을 그대로 쓰는 스트로크 리본(스무딩·리샘플 없음), 커넥터 프레임은 구간 방향(날카로운 프레임).
+   - 폴리곤 = 도려내기(영역이 파트 A), 깊이 0 = 관통; 커넥터는 깊이가 있는 도려내기의 **바닥**에만(벽 커넥터는 없음).
+   - 단위 Fix는 두 방식: Keep Units(설정만 바꿈, 기본) / Keep Size(씬의 모든 오브젝트를 스케일).
+   - 커스텀 소켓 캐시는 세션 메모리(파일·오브젝트에 저장하지 않음): 볼록 메시는 ms, 오목 메시도 1–2 s라 저장 이득이 작고,
+     클릭 모달·Distribute 중에 ID 프로퍼티를 쓰면 undo 단계에 섞이기 때문.

@@ -63,7 +63,11 @@ class SPLITFORGE_OT_export_parts(Operator):
         if not formats:
             self.report({'ERROR'}, "No export format selected")
             return {'CANCELLED'}
-        os.makedirs(directory, exist_ok=True)
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as ex:
+            self.report({'ERROR'}, f"Cannot create the export folder {directory}: {ex.strerror or ex}")
+            return {'CANCELLED'}
 
         all_parts = built_parts(stack_api.context_owner(context))
         parts = [p for p in all_parts if p.visible_get()]
@@ -77,7 +81,7 @@ class SPLITFORGE_OT_export_parts(Operator):
         view_layer = context.view_layer
         selected = [o.name for o in context.selected_objects]
         active = view_layer.objects.active.name if view_layer.objects.active else None
-        written = []
+        written, failed = [], None
         # Dowel parts are written in their print pose (Flat, or Upright when chosen), whatever the layout
         print_pose = build.print_layout(settings.dowel_layout)
         placed = {p.name: p.matrix_world.copy() for p in parts if p.get(naming.PROP_DOWEL) is not None}
@@ -90,8 +94,14 @@ class SPLITFORGE_OT_export_parts(Operator):
                 view_layer.objects.active = part
                 for fmt in sorted(formats):
                     path = os.path.join(directory, bpy.path.clean_name(part.name) + EXTENSIONS[fmt])
-                    compat.export_selected(fmt, path, scale)
+                    try:
+                        compat.export_selected(fmt, path, scale)
+                    except (OSError, RuntimeError) as ex:
+                        failed = (path, str(ex).strip().splitlines()[-1] if str(ex).strip() else type(ex).__name__)
+                        break
                     written.append(path)
+                if failed:
+                    break
         finally:
             for name, m in placed.items():
                 o = bpy.data.objects.get(name)
@@ -104,6 +114,9 @@ class SPLITFORGE_OT_export_parts(Operator):
                 if o is not None and o.name in view_layer.objects and o.visible_get():
                     o.select_set(True)
             view_layer.objects.active = bpy.data.objects.get(active) if active else None
+        if failed:
+            self.report({'ERROR'}, f"Could not write {failed[0]} ({failed[1]}); {len(written)} file(s) written")
+            return {'CANCELLED'}
         self.report({'INFO'}, f"Exported {len(written)} file(s) to {directory}")
         return {'FINISHED'}
 

@@ -9,16 +9,18 @@ the JSON reports and prints a summary. Exit code 0 only if every selected case
 passed in every Blender version.
 
 Usage:
-    python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow]
+    python3 tests/run_tests.py [--blender EXE]... [--all-versions] [--case PATTERN]... [--slow] [--zip FILE]
                                 [--gui [--gui-only] [--gui-scenario NAME]...]
 
 ``--gui`` additionally runs the modal-operator scenarios in ``tests/gui/gui_runner.py``
-(QA-5..QA-10 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
+(QA-5..QA-12 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
 with simulated input; screenshots go to ``tests/_out/gui/``. Takes a few minutes;
 windows pop up and must not be touched while they run.
 
-Default Blender executables are BL45 and BL52 below (override with the
-environment variables of the same name). Windows executables are supported from
+SplitForge supports Blender 5.2 only (user decision 2026-10-10): the default
+executable is BL52 below. ``--all-versions`` also runs BL45 (Blender 4.5, kept as an
+optional regression signal, not a supported version); ``--blender`` picks any
+executables (override the defaults with the environment variables of the same name). Windows executables are supported from
 WSL: paths handed to them are converted with ``wslpath -w``.
 
 Blender runs with TEMP/TMP/TMPDIR set to ``tests/_out/tmp`` (forwarded through
@@ -106,8 +108,13 @@ def run_blender(exe, args, timeout):
     repo_dir = os.path.join(OUT_DIR, "repo_" + label)
     json_path = os.path.join(OUT_DIR, "results_" + label + ".json")
     shutil.rmtree(repo_dir, ignore_errors=True)
-    shutil.copytree(ADDON_DIR, os.path.join(repo_dir, PACKAGE),
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    if args.zip:
+        import zipfile
+        with zipfile.ZipFile(args.zip) as z:
+            z.extractall(os.path.join(repo_dir, PACKAGE))
+    else:
+        shutil.copytree(ADDON_DIR, os.path.join(repo_dir, PACKAGE),
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     if os.path.exists(json_path):
         os.remove(json_path)
 
@@ -146,8 +153,37 @@ def run_blender(exe, args, timeout):
 
 
 GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel", "p2_stroke", "p2_build_progress", "p3_connector_click",
-                 "p3_connector_types")
+                 "p3_connector_types", "p4_points", "p4_fix")
 GUI_SHOTS_DIR = os.path.join(OUT_DIR, "gui")
+
+
+def run_zip_install(exe, zip_path, timeout):
+    """Install the release zip with package_install_files in a fresh Blender. Returns (ok, lines)."""
+    label = label_for(exe)
+    repo_dir = os.path.join(OUT_DIR, "zip_repo_" + label)
+    json_path = os.path.join(OUT_DIR, "zip_install_" + label + ".json")
+    shutil.rmtree(repo_dir, ignore_errors=True)
+    os.makedirs(repo_dir)
+    if os.path.exists(json_path):
+        os.remove(json_path)
+    cmd = [exe, "-b", "--factory-startup", "--python", to_exe_path(os.path.join(TESTS_DIR, "package_install.py"), exe),
+           "--", "--zip", to_exe_path(os.path.abspath(zip_path), exe), "--repo-dir", to_exe_path(repo_dir, exe),
+           "--out", to_exe_path(json_path, exe)]
+    try:
+        returncode = subprocess.run(cmd, timeout=timeout, env=blender_env(exe), stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.STDOUT).returncode
+    except subprocess.TimeoutExpired:
+        returncode = "timeout"
+    shutil.rmtree(repo_dir, ignore_errors=True)
+    report = None
+    if os.path.exists(json_path):
+        with open(json_path, encoding="utf-8") as f:
+            report = json.load(f)
+    ok = bool(report and report.get("ok") and returncode == 0 and tempdir_ok(report, to_exe_path(TMP_DIR, exe)))
+    lines = [f"  {'PASS' if ok else 'FAIL'} zip install {os.path.basename(zip_path)} exit={returncode}"]
+    for c in (report or {}).get("checks", []):
+        lines.append(f"       {'ok  ' if c['ok'] else 'FAIL'} {c['name']} {c['detail'][:200] if not c['ok'] else ''}")
+    return ok, lines
 
 
 def run_gui(exe, scenario, timeout):
@@ -212,12 +248,16 @@ def run_gui(exe, scenario, timeout):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--blender", action="append", default=[],
-                    help="Blender executable (repeatable). Default: BL45 and BL52.")
+                    help="Blender executable (repeatable). Default: BL52 (Blender 5.2, the supported version).")
+    ap.add_argument("--all-versions", action="store_true",
+                    help="Also run BL45 (Blender 4.5; optional, unsupported).")
     ap.add_argument("--case", action="append", default=[],
                     help="Case name or glob, e.g. test_register or 'test_legacy_*' (repeatable).")
     ap.add_argument("--slow", action="store_true", help="Also run slow cases (SLOW = True).")
     ap.add_argument("--timeout", type=float, default=3600.0,
                     help="Timeout per Blender run in seconds.")
+    ap.add_argument("--zip", default="", metavar="FILE",
+                    help="Release zip: install it with package_install_files and run the cases on its contents.")
     ap.add_argument("--gui", action="store_true",
                     help="Also run the tests/gui scenarios (opens Blender windows with simulated "
                          "input; do not touch them while they run).")
@@ -227,7 +267,9 @@ def main():
                     help="With --gui: skip the headless cases.")
     args = ap.parse_args()
 
-    exes = args.blender or [BL45, BL52]
+    exes = list(args.blender) or [BL52]
+    if args.all_versions and BL45 not in exes:
+        exes.insert(0, BL45)
     missing = [e for e in exes if not os.path.isfile(e)]
     if missing:
         print("Blender executable not found: " + ", ".join(missing), file=sys.stderr)
@@ -262,6 +304,13 @@ def main():
             print("  no cases selected")
         for note in report.get("notes", []):
             print(f"  note: {note}")
+    if args.zip:
+        print("\n=== Release zip install (tests/package_install.py)")
+        for exe in exes:
+            zip_ok, lines = run_zip_install(exe, args.zip, min(args.timeout, 600.0))
+            ok = ok and zip_ok
+            print(label_for(exe))
+            print("\n".join(lines))
     if args.gui:
         print("\n=== GUI scenarios (tests/gui/gui_runner.py)")
         for exe in exes:
