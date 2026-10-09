@@ -14,7 +14,16 @@ import lib
 def run(ctx):
     lib.set_scene_mm()
     monkey = lib.make_monkey_manifold(40.0)
-    v0 = lib.volume(monkey, signed=True)
+    # Booleans Auto/Accurate unite the intersecting eye shells before cutting: the parts add up to
+    # the united volume (the plain mesh volume counts the eye/head overlap twice)
+    boolean = ctx.module("core.boolean")
+    bm = lib.bm_of(monkey)
+    united, why = boolean.unite_bm(bm)
+    bm.free()
+    assert united is not None, why
+    v0 = united.calc_volume(signed=True)
+    united.free()
+    ctx.metric("overlap_pct", round(100.0 * (1.0 - v0 / lib.volume(monkey, signed=True)), 2))
     for offset in (0.0, 4.0, 8.0, -2.0):
         lib.select_only([bpy.data.objects["Suzanne"]])
         stack = bpy.data.objects["Suzanne"].splitforge_stack

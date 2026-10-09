@@ -42,10 +42,9 @@ from . import plane, stroke
 # Largest spacing of the connector surface samples (connectors/fit.py)
 FIT_STEP_MM = 1.0
 # Stroke split: part A + part B + gap volume must match the piece volume within
-# PAIR_TOLERANCE (relative) + PAIR_ABS_TOLERANCE x bbox diagonal^3 + the triangulation slack of
-# the faces the ribbons cross (meshlib.triangulation_slack: zero for planar faces, ~0.1 % for a
-# Suzanne cut where re-triangulating non-planar quads changes the volume). Loose only where it must be:
-# intersecting shells (the exact solver unites them, ~1.7 % less on a filled Suzanne) and the
+# PAIR_TOLERANCE (relative) + PAIR_ABS_TOLERANCE x bbox diagonal^3. Pieces are triangulated
+# before the booleans, so no solver can change the volume by re-triangulating non-planar faces
+# (defect D13). Loose only where it must be: intersecting shells left overlapping (Fast) and the
 # voxel fallback (approximated surface).
 PAIR_TOLERANCE = 1e-3
 PAIR_TOLERANCE_LOOSE = 0.04
@@ -111,7 +110,8 @@ class StrokeCut:
         if self._barrier is None:
             ribbon = self.cutter.ribbon()
             try:
-                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(ribbon), self.gap, self.cutter.is_positive)
+                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(ribbon), self.gap, self.cutter.is_positive,
+                                                  self.cutter.ribbon_face_interior)
             finally:
                 ribbon.free()
         return self._barrier
@@ -239,10 +239,10 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
     """
     cutter = spec.cutter
     piece_bvh = BVHTree.FromBMesh(piece)
+    tri = None
     plus_bvh = ribbon_bvh(cutter, cutter.plus)
     minus_bvh = plus_bvh if cutter.minus is cutter.plus else ribbon_bvh(cutter, cutter.minus)
-    hits = {'A': piece_bvh.overlap(plus_bvh), 'B': piece_bvh.overlap(minus_bvh)}
-    crosses = {key: bool(pairs) for key, pairs in hits.items()}
+    crosses = {'A': bool(piece_bvh.overlap(plus_bvh)), 'B': bool(piece_bvh.overlap(minus_bvh))}
     probe = cutter.frame.to2d(next(iter(piece.verts)).co) if piece.verts else (0.0, 0.0)
     keep = {'A': stroke.point_in_polygon(probe, stroke.left_polygon(cutter.plus, cutter.box)),
             'B': not stroke.point_in_polygon(probe, stroke.left_polygon(cutter.minus, cutter.box))}
@@ -250,7 +250,6 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
 
     order = boolean.attempt_order(quality, self_intersect, faces=len(piece.faces))
     start = 0
-    slack = None
     while True:
         results, out = {}, {}
         try:
@@ -260,9 +259,12 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
                 if not crosses[key]:
                     out[key] = piece.copy() if keep[key] else None
                     continue
+                if tri is None:
+                    tri = piece.copy()
+                    bmesh.ops.triangulate(tri, faces=tri.faces[:])
                 operand = makers[key]()
                 try:
-                    res, bm = boolean.apply_bm(piece, operand, 'DIFFERENCE', quality, order=order[start:])
+                    res, bm = boolean.apply_bm(tri, operand, 'DIFFERENCE', quality, order=order[start:])
                 finally:
                     operand.free()
                 results[key] = res
@@ -275,25 +277,26 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
             for bm in out.values():
                 if bm is not None:
                     bm.free()
+            if tri is not None:
+                tri.free()
             raise
         if len(results) < 2:
+            if tri is not None:
+                tri.free()
             return out['A'], out['B']
-        volume = meshlib.bm_volume(piece)
+        volume = meshlib.bm_volume(tri)
         va, vb = meshlib.bm_volume(out['A']), meshlib.bm_volume(out['B'])
         eps = max(meshlib.bm_diagonal(piece) * 1e-4, 1e-6)
         gap_volume = cutter.gap * 0.5 * (cap_area(out['A'], plus_bvh, eps) + cap_area(out['B'], minus_bvh, eps))
         loose = self_intersect or any(r.solver == boolean.VOXEL for r in results.values())
-        if slack is None:
-            piece.faces.ensure_lookup_table()
-            crossed = {i for pairs in hits.values() for i, _j in pairs}
-            slack = meshlib.triangulation_slack(piece.faces[i] for i in crossed)
         diag = meshlib.bm_diagonal(piece)
-        tight = volume * PAIR_TOLERANCE + PAIR_ABS_TOLERANCE * diag ** 3 + slack
-        tol = volume * PAIR_TOLERANCE_LOOSE + slack if loose else tight
+        tight = volume * PAIR_TOLERANCE + PAIR_ABS_TOLERANCE * diag ** 3
+        tol = volume * PAIR_TOLERANCE_LOOSE if loose else tight
         lo = volume - gap_volume - tol
         hi = volume - gap_volume + tight
         if lo <= va + vb <= hi:
             warnings.extend(r.message for r in results.values() if r.message)
+            tri.free()
             return out['A'], out['B']
         used = max(order.index(r.solver) for r in results.values())
         msg = (f"{spec.label}: parts A + B = {va + vb:.6g} for a piece of {volume:.6g} "
@@ -301,6 +304,7 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
         for bm in out.values():
             bm.free()
         if used + 1 >= len(order):
+            tri.free()
             raise BuildError(msg + "; no solver left. Nothing was changed.")
         log.info("%s; retrying with %s", msg, order[used + 1])
         start = used + 1
@@ -567,6 +571,24 @@ def build_steps(obj):
         if uncrossed:
             infos.append(f"{uncrossed} separate shell(s) not crossed by any cut stay whole in the part "
                          "that contains them")
+        if self_intersect:
+            if unites_shells(quality, len(bm.faces)):
+                # Accurate: unite the intersecting shells once, so every later boolean sees clean
+                # input and is validated against the right volume (defect D14)
+                prog.set_total(prog.total + 1)
+                prog.step("uniting intersecting shells")
+                yield
+                united, why = boolean.unite_bm(bm)
+                if united is not None:
+                    bm.free()
+                    bm, self_intersect = united, False
+                    infos.append(f"Intersecting shells were united into one solid "
+                                 f"(Booleans: {QUALITY_NAMES[quality]})")
+                else:
+                    warnings.append(f"Intersecting shells could not be united ({why}); they stay overlapping")
+            else:
+                infos.append(f"Intersecting shells stay overlapping in the parts (Booleans: "
+                             f"{QUALITY_NAMES[quality]}); slicers unite them, Accurate unites them here")
         consumed, bm = bm, None
         pieces = yield from iter_cut_pieces(consumed, specs, warnings, quality, prog, self_intersect, booleans)
         if len(pieces) < 2:
@@ -641,6 +663,11 @@ def build_steps(obj):
 
 
 QUALITY_NAMES = {'AUTO': "Auto", 'ACCURATE': "Accurate", 'FAST': "Fast"}
+
+
+def unites_shells(quality, faces):
+    """True if the quality setting unites intersecting shells (Accurate, or Auto below the size limit)."""
+    return quality == 'ACCURATE' or (quality == 'AUTO' and faces <= boolean.LARGE_FACES)
 
 
 def solver_summary(booleans, quality):

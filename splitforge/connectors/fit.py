@@ -94,21 +94,24 @@ class RibbonBarrier:
     """A stroke cut: its open ribbon (BVH, depth-sliced) and an exact side test.
 
     The side of a point comes from the nearest ribbon face's normal (ribbon
-    normals point to the positive side) when that is unambiguous, otherwise
-    from ``side_fn`` (exact 2D point-in-polygon of the cutter's positive side).
-    A ray-parity test on the cutter prism misclassified points next to its
-    sliver faces (defect D11: Distribute and Build disagreed at one position).
+    normals point to the positive side) only when the nearest point lies inside
+    that face (``interior_fn(face index, point)``): then the offset is along the
+    normal and the sign is exact. Nearest to an edge or corner of the curve, the
+    face normal can point the wrong way (sharp raw corners, defect D15), so
+    ``side_fn`` (exact 2D point-in-polygon) decides. A ray-parity test on the
+    cutter prism had misclassified points next to its sliver faces (D11).
     """
 
-    def __init__(self, ribbon_bvh, gap, side_fn):
+    def __init__(self, ribbon_bvh, gap, side_fn, interior_fn=None):
         self.ribbon_bvh, self.gap, self.side_fn = ribbon_bvh, gap, side_fn
+        self.interior_fn = interior_fn
+        self.exact_calls = 0
 
     def positive(self, p):
-        co, normal, _index, dist = self.ribbon_bvh.find_nearest(p)
-        if co is not None and dist > 0.0:
-            dot = (p - co).dot(normal)
-            if abs(dot) > 0.5 * dist:
-                return dot > 0.0
+        co, normal, index, dist = self.ribbon_bvh.find_nearest(p)
+        if co is not None and dist > 0.0 and self.interior_fn is not None and self.interior_fn(index, co):
+            return (p - co).dot(normal) > 0.0
+        self.exact_calls += 1
         return self.side_fn(p)
 
     def distance(self, p):

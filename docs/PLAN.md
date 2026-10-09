@@ -218,7 +218,9 @@ apply_bm(target_bm, operand_bm, op, ...) -> (BooleanResult, bmesh|None)     # �
 - 곡선 컷(`cuts/build.py`): 리본이 닿는 조각마다 `remove_for_a` / `remove_for_b`로 DIFFERENCE 2회, 결과 쌍이 부피 보존(A + B + 갭 부피 = 조각;
   허용 0.1 % + 리본이 지나는 면의 삼각분할 여유(비평면 사각형) — 셸이 교차하거나 voxel 폴백일 때만 4 %, D9)을
   만족하지 않으면 사용한 솔버 다음부터 둘 다 다시. 리본이 닿지 않는 조각은 통째로 자기 쪽.
-- 소스 셸끼리 교차(구멍 메운 Suzanne의 눈↔머리)하면 모든 불리언을 EXACT_SELF부터 시작(EXACT는 이런 입력에서 빈 결과).
+- 소스 셸끼리 교차(구멍 메운 Suzanne의 눈↔머리)하면: Accurate는 Build 시작에 사본의 셸을 한 번 합침(EXACT_SELF), Fast는 겹친 채 MANIFOLD.
+  남은 경로에서 EXACT_SELF/VOXEL 결과는 합친 부피 기준으로 검증(평범한 부피는 겹침을 두 번 셈, D14).
+- 곡선 컷 조각은 불리언 전에 삼각분할(D13: 비평면 면 재분할이 부피 손실을 가리지 않게).
 - 진행률: Build는 단계 생성기(`build_steps`), 모달 Build가 타이머로 한 단계씩 실행(`core/progress.py`: 커서 진행률 + 상태바).
 
 곡선 컷 커터(`cuts/stroke.py`, 2026-10-09 결정: 뷰 투영 리본): 스트로크(월드 폴리라인 + 압출 방향 d, 레코드에는 오브젝트 로컬로 저장)를
@@ -295,3 +297,4 @@ A = 조각 − 오른쪽(곡선+갭/2), B = 조각 − 왼쪽(곡선−갭/2). �
    Fast = MANIFOLD 먼저(검증), 실패 시 Accurate 체인. 트레이드오프: MANIFOLD는 교차하는 셸(Suzanne 눈↔머리)을 합치지 않고 겹친 채로 둔다
    (각 셸이 따로 잘림, 슬라이서가 합침), Accurate(EXACT_SELF)는 하나의 솔리드로 합친다. Build 정보 줄에 사용한 솔버
    ("Booleans (Auto): 2x MANIFOLD, …; fallbacks: …"). 51만 면 실측(5.2): 평면 Build Auto 14.4 s / Accurate 60.5 s, S자 Build Auto 6.2 s / Accurate 86.7 s.
+   (D14 수정 후) Accurate는 Build 시작에 교차 셸을 한 번 합친 뒤 깨끗한 입력에 EXACT — 수치는 CHECKLIST "Phase 2 검증 3차 후속".

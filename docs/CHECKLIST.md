@@ -184,6 +184,26 @@
 (위 P2F-7 수치).
 - 독립 검증(2026-10-09, verifier, develop 398154a): 헤드리스 37/37 ×2 PASS(4.5.5/5.2.2), `--gui` 12시나리오 ×2 PASS, `--slow`(5.2) PASS: 평면 Auto 14.31 s / Accurate 61.43 s, S자 Auto 6.35 s(MANIFOLD×4) / Accurate 88.53 s(EXACT_SELF×4). 뮤테이션 6건 중 5건 검출(여유 0, D10 경고 제거, Distribute 여유 0, Auto 크기 무시, 항상 느슨); 리본 쪽 판정에서 2D 폴백 제거는 미검출. 3 % 손실 주입은 촘촘한 메시에서 모두 거부, 단 거친 비평면 메시(비평면 n각형 여유 최대 15 %)에서는 통과(D13). Accurate 평면 Build 커넥터 폴백 3건은 EXACT_SELF가 틀린 것이 아니라 겹친 셸을 두 번 센 before 부피 때문(D14). 원시 140° 꺾임 스트로크에서 쪽 판정 불일치(D15, 낮음). 라이브 5.2 PASS(MANUAL_QA "P2 후속 수정 라이브 검증").
 
+### Phase 2 검증 3차 후속 (fix/p2-d13-d15)
+
+- [x] **D14 Accurate가 올바른 EXACT_SELF 결과를 거부**: 교차 셸(눈↔머리) 파트의 "이전 부피"가 겹침을 두 번 셈. (1) EXACT_SELF/VOXEL 결과가 부피
+  사유로 거부되면 대상의 *합친* 부피(EXACT_SELF 자기 합집합, 1회)로 다시 검사 — 비매니폴드는 그대로 거부; (2) Accurate(또는 Auto ≤ 200k 면)는
+  Build 시작 시 소스 사본의 교차 셸을 한 번 합치고(정보 "Intersecting shells were united into one solid"), 이후 모든 불리언은 깨끗한 입력에서
+  EXACT. Fast/큰 Auto는 정보 "Intersecting shells stay overlapping … Accurate unites them here".
+  검증: `test_stroke_robust.py`(겹친 Suzanne에 핀 UNION → EXACT_SELF 폴백 없음; 비매니폴드 주입 → 거부; Accurate 평면 Build 커넥터 전부 EXACT·
+  폴백 0), `test_boolean_quality.py`(Accurate 전부 EXACT + 합침 정보, Fast 겹침 정보), `test_build_monkey`(부피 합 = 합친 부피, 겹침 1.66 %).
+- [x] **D13 삼각분할 여유가 실제 손실을 숨김**: 곡선 컷 전에 조각을 삼각분할 → 어느 솔버도 비평면 면 재분할로 부피를 바꾸지 못함, 여유 제거, 쌍 검사
+  0.1 %. 검증: `test_stroke_robust.py` — 날 Suzanne 머리·지터 큐브(±4 mm)·비평면 64각 캡 원기둥: 정상 컷 첫 시도 통과, 한쪽 0.5 %/3 % 손실 주입 → 거부·재시도.
+- [x] **D15 날카로운 날(raw) 모서리에서 쪽 판정 오류**: 최근접점이 면 *내부*일 때만 리본 법선, 모서리/꼭짓점이면 정확한 2D 판정. 검증: 날 지그재그·V
+  각 20 000 샘플 불일치 0, 2D 폴백 9702/1254회 실행.
+- [x] **낮음**: Fast/Auto가 교차 셸을 겹친 채 둘 때 Build 정보; 스트로크 컷 문제는 그리기 때 입력(변환·bbox·단위 스케일·갭·점)에 키를 둔 캐시로
+  계산(저장 속성 제거) — 단위 스케일·오브젝트 스케일 변경 시 바로 갱신(`test_stroke_checks.py`).
+- 뮤테이션 7/7 검출(합친 부피 재검사 제거, Build 셸 합침 제거, 삼각분할 제거, 모서리에서도 법선 신뢰, 2D 폴백 제거, 겹침 정보 제거, 캐시 미갱신).
+
+결과(2026-10-09): 헤드리스 38/38 PASS ×2(4.5.5/5.2.2), `--gui` 12개 시나리오 ×2 PASS, `--slow test_perf_large`(5.2, 514 560면) PASS:
+평면 Build Auto 13.81 s / **Accurate 38.16 s**(이전 60.45 s; 셸 합침 1회 후 커넥터 EXACT 4회, 폴백 0), S자 Build Auto 8.88 s(MANIFOLD) /
+**Accurate 38.81 s**(이전 86.71 s; 합침 ~30 s + EXACT 1.7/1.7/1.0/0.9 s).
+
 ## Phase 3 — 커넥터 고도화 + 레거시 제거
 
 - [ ] **P3-1 전 타입 지원**: DOVETAIL, SNAP_PIN, SNAP_TENON, SNAP_DOVETAIL, CUSTOM을 `connectors/shapes.py`로 이관, 새 apply 경로에서 생성.

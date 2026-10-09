@@ -2,8 +2,8 @@
 """Boolean quality setting (Scene ``splitforge.boolean_quality``: Auto / Accurate / Fast).
 
 Filled Suzanne (eye shells intersect the head) with a stroke through the eyes and a
-pin: Accurate cuts with EXACT_SELF (the eyes are united with the head: parts lose the
-overlap volume), Fast with MANIFOLD (shells stay overlapping: parts keep it), Auto
+pin: Accurate first unites the shells (info), then cuts with plain EXACT (parts lose the
+overlap volume), Fast uses MANIFOLD (shells stay overlapping: parts keep it, info), Auto
 behaves like Accurate below LARGE_FACES and like Fast above (threshold lowered here).
 Build's info line names the solvers ("Booleans (Fast): 4x MANIFOLD"). Every result is
 still validated (manifold parts).
@@ -33,7 +33,7 @@ def run(ctx):
     c = cut.connectors.add()
     c.u, c.v = -8.0, 0.0
 
-    results = {}
+    results, results_infos = {}, {}
     for quality in ('ACCURATE', 'FAST', 'AUTO'):
         settings.boolean_quality = quality
         lib.select_only([monkey])
@@ -44,15 +44,16 @@ def run(ctx):
         solvers = [entry[1] for entry in res.booleans]
         total = sum(lib.volume(p) for p in parts)
         results[quality] = (solvers, total, [i for i in res.infos if i.startswith("Booleans")])
+        results_infos[quality] = res.infos
         ctx.metric(quality.lower(), f"{','.join(solvers)} {total:.0f}/{v_source:.0f}")
     acc, fast, auto = results['ACCURATE'], results['FAST'], results['AUTO']
-    assert acc[0][:2] == ['EXACT_SELF', 'EXACT_SELF'], acc
-    # A fallback (here the pin booleans on the united parts) is named in the info line
-    if any(s != 'EXACT_SELF' for s in acc[0]):
-        assert "fallbacks:" in acc[2][0], acc[2]
+    # Accurate unites the intersecting shells once (D14): every later boolean is plain EXACT, no fallback
+    assert acc[0] == ['EXACT'] * 4, acc
+    assert any("united into one solid" in i for i in results_infos['ACCURATE']), results_infos['ACCURATE']
+    assert any("stay overlapping" in i for i in results_infos['FAST']), results_infos['FAST']
     assert fast[0][:2] == ['MANIFOLD', 'MANIFOLD'], fast
-    assert auto[0][:2] == acc[0][:2], ("Auto below the threshold = Accurate", auto, acc)
-    assert acc[2] and acc[2][0].startswith("Booleans (Accurate):") and "EXACT_SELF" in acc[2][0], acc[2]
+    assert auto[0] == acc[0], ("Auto below the threshold = Accurate", auto, acc)
+    assert acc[2] and acc[2][0].startswith("Booleans (Accurate):") and "EXACT" in acc[2][0], acc[2]
     assert fast[2] and fast[2][0].startswith("Booleans (Fast):") and "MANIFOLD" in fast[2][0], fast[2]
     # Accurate unites the overlapping eyes (less volume), Fast keeps them overlapping
     assert acc[1] < fast[1] - 0.005 * v_source, (acc[1], fast[1])

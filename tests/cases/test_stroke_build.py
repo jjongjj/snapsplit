@@ -189,9 +189,9 @@ def run(ctx):
     # The exact solver unites the overlapping eye/head volume (~1.7 %): sum <= source, within 4 %
     assert v_monkey * 0.96 <= total <= v_monkey * 1.0001, (total, v_monkey)
     ctx.metric("monkey_muzzle", f"{total:.0f}/{v_monkey:.0f} {result.booleans[0][1]}")
-    first = [entry[2][0][0] for entry in result.booleans if entry[0].startswith("Stroke")]
-    assert first and all(f == 'EXACT_SELF' for f in first), ("self-intersecting source starts with EXACT_SELF",
-                                                             result.booleans)
+    # Accurate (Auto on a small mesh) unites the intersecting eye shells first, then cuts with EXACT
+    assert any("united into one solid" in i for i in result.infos), result.infos
+    assert all(entry[1] == 'EXACT' and len(entry[2]) == 1 for entry in result.booleans), result.booleans
     # Through the eyes (z ~ +5 at the front): the eyes are cut as well
     stack = monkey.splitforge_stack
     stack.cuts.clear()
