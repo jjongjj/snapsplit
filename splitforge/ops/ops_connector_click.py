@@ -265,8 +265,9 @@ class SPLITFORGE_OT_connector_add_click(Operator):
                                values.pop("width_mm"), values.pop("height_mm"), values.pop("length_mm"),
                                clearance, self._side, seam.spec, custom=custom, **values)
         wall = units.mm_to_scene(auto.MIN_WALL_MM, scene)
-        reason = fit.check(spec, seam.source, others, wall, max_step=units.mm_to_scene(build.FIT_STEP_MM, scene),
-                           own=own).reason(wall)
+        reason = auto.own_reason(fit.check(spec, seam.source, others, wall,
+                                           max_step=units.mm_to_scene(build.FIT_STEP_MM, scene), own=own).reason(wall),
+                                 own)
         if reason:
             return auto.REASONS[reason]
         c = stack_api.add_connector(cut, t, u, v)

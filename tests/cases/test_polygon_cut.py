@@ -94,6 +94,19 @@ def run(ctx):
     xs = [abs((a.matrix_world @ v.co).x) for v in a.data.vertices if (a.matrix_world @ v.co).z < 9.99]
     assert xs and max(xs) < 10.0 - 0.4, max(xs)
     ctx.metric("floor_pins", f"plug {lib.volume(a):.1f} body {lib.volume(b):.1f}")
+    # a floor connector reaching into the wall: skipped with a polygon-specific reason
+    lib.select_only([cube])
+    cube.hide_set(False)
+    cut = cube.splitforge_stack.cuts[0]
+    near = cut.connectors.add()
+    near.u, near.v, near.width_mm, near.length_mm = 8.5, 0.0, 5.0, 10.0
+    res = build.build(bpy.context, cube)
+    walls = [w for w in res.warnings if "wall of the polygon cut-out" in w]
+    assert len(walls) == 1 and not any("curved seam" in w for w in res.warnings), res.warnings
+    cut.connectors.remove(len(cut.connectors) - 1)
+    auto = ctx.module("connectors.auto")
+    assert auto.REASONS[auto.own_reason("own seam", build.cut_spec(cube, cut, bpy.context.scene).barrier())] == \
+        "too close to the wall of the polygon cut-out"
 
     # --- through with a gap ---------------------------------------------------------------------
     col = new_cube("PGT")

@@ -174,7 +174,8 @@ class PolygonCut:
         if self._barrier is None:
             bm = self.cutter.solid()
             try:
-                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(bm), self.gap, self.cutter.is_inside)
+                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(bm), self.gap, self.cutter.is_inside,
+                                                  wall=True)
             finally:
                 bm.free()
         return self._barrier
