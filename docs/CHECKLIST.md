@@ -437,3 +437,6 @@ p3_connector_click 21.7 s, p3_connector_types 10.0 s, p4_points 36.1 s, p4_fix 1
   (… mm^3; the booleans need at least … mm^3 here)"). 검증: `test_polygon_cut.py` — 300 mm 4×4×10(160)·6×6×5(180), 500 mm 10×10×5(500),
   40 mm 1×1×0.5(0.5) 모두 EXACT×2 빌드·플러그 부피 1e-3; 0.4.0 방식으로 저장된 500 mm 큐브 포켓은 패널 문제 없음·빌드; 0.01/0.2/0.49 mm
   정사각형 "too narrow", 깊이 0.1 "too shallow", 2 m 큐브 1×1×1 "too small for an object this large".
+  결과(2026-10-10, fix/p4-d22, 5.2.2): 헤드리스 44/44 PASS, `--zip dist/splitforge-0.4.1.zip`(44파일, 156 341 B) 44/44 + 설치 검사 PASS,
+  `--gui p4_points` PASS(36.1 s), `extension validate`/`build` 성공. 뮤테이션 5/5 검출(이전 상대 규칙 복원, 부피·깊이·폭 규칙 끔, 폭을
+  오브젝트 크기에 비례). 버전은 0.4.1 유지(0.4.1은 아직 릴리스되지 않음; CHANGELOG 항목 갱신).
