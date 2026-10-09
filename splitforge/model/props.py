@@ -33,8 +33,8 @@ CONNECTOR_KINDS = [
 ]
 
 PIN_SIDES = [
-    ('A', "A (+normal)", "The pin sits on the part on the positive side of the cut normal"),
-    ('B', "B (-normal)", "The pin sits on the part on the negative side of the cut normal"),
+    ('A', "A (+N)", "The pin sits on the part on the positive side of the cut normal"),
+    ('B', "B (-N)", "The pin sits on the part on the negative side of the cut normal"),
 ]
 
 DISTRIBUTIONS = [

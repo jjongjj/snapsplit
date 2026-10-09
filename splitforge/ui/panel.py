@@ -25,27 +25,25 @@ def _owner_stack(context):
 
 
 class SPLITFORGE_UL_cuts(UIList):
+    """Cuts: checkbox + name only, so names stay readable in a narrow sidebar
+    (gap and connector count are shown in the box under the list)."""
     bl_idname = naming.cls("UL", "cuts")
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
         row = layout.row(align=True)
         row.prop(item, "enabled", text="")
-        row.prop(item, "name", text="", emboss=False, icon='MESH_PLANE')
-        if item.gap_mm > 0.0:
-            row.label(text=f"gap {item.gap_mm:g}")
-        if len(item.connectors):
-            row.label(text=str(len(item.connectors)), icon='SNAP_FACE_CENTER')
+        row.prop(item, "name", text="", emboss=False)
 
 
 class SPLITFORGE_UL_connectors(UIList):
+    """Connectors: short label (number, type, pin side); position/size in the box below."""
     bl_idname = naming.cls("UL", "connectors")
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
         row = layout.row(align=True)
         row.prop(item, "enabled", text="")
         kind = "Pin" if item.kind == 'CYL_PIN' else "Tenon"
-        row.label(text=f"{index + 1}: {kind} ({item.u:.1f}, {item.v:.1f})")
-        row.prop(item, "pin_side", text="")
+        row.label(text=f"{index + 1} {kind}  pin {item.pin_side}")
 
 
 class _Base:
@@ -61,8 +59,8 @@ def draw_checks(context, layout, obj):
     scale_ok = validate.transform_is_applied(obj)
     mm_ok = units.is_mm_scene(context.scene)
     row.label(text="Transforms", icon='CHECKMARK' if scale_ok else 'ERROR')
-    row.label(text="Units mm" if mm_ok else
-              f"1 unit = {units.bu_to_mm_factor(context.scene):g} mm", icon='CHECKMARK' if mm_ok else 'ERROR')
+    row.label(text=f"1 unit = {units.bu_to_mm_factor(context.scene):g} mm",
+              icon='CHECKMARK' if mm_ok else 'INFO')
     row.operator(OP("validate"), text="", icon='VIEWZOOM')
 
 
@@ -96,6 +94,7 @@ def draw_draft(context, layout, stack):
     cut = stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
     box = layout.box()
     box.row().prop(cut, "name", text="")
+    box.label(text=f"Gap {cut.gap_mm:g} mm, {len(cut.connectors)} connector(s)")
     row = box.row(align=True)
     row.prop(cut, "enabled")
     row.prop(cut, "cap")
@@ -121,7 +120,10 @@ class SPLITFORGE_PT_main(_Base, Panel):
             return
         active = context.active_object
         if active is not None and active != obj:
-            layout.label(text=f"Part of {obj.name}", icon='LINKED')
+            # Built parts have no stack of their own: edits go to the source's stack
+            col = layout.column(align=True)
+            col.label(text=f"Part of {obj.name}", icon='LINKED')
+            col.label(text="Editing the source's cuts")
         else:
             layout.label(text=obj.name, icon='OBJECT_DATA')
 
@@ -184,7 +186,9 @@ class SPLITFORGE_PT_connectors(_Base, Panel):
         if c.kind == 'RECT_TENON':
             row.prop(c, "height_mm", text="H")
         row.prop(c, "length_mm", text="L")
-        box.row().prop(c, "pin_side", expand=True)
+        row = box.row(align=True)
+        row.label(text="Pin on")
+        row.prop(c, "pin_side", expand=True)
         box.prop(c, "clearance_mm")
 
 

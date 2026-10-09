@@ -22,7 +22,7 @@ def _report_result(op, result):
 
 
 class SPLITFORGE_OT_build(Operator):
-    """Build the enabled cuts into a result collection (the original object is not modified)"""
+    """Build the enabled cuts into a result collection (the original object is not modified). With a built part selected, the source object's stack is built"""
     bl_idname = naming.op("build")
     bl_label = "Build"
     bl_options = {'REGISTER', 'UNDO'}
@@ -96,8 +96,10 @@ class SPLITFORGE_OT_easy_cut(Operator):
         if count > 0:
             cut.distribution = 'LINE'
             cut.connector_count = count
-            auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
-                          s.new_connector_height_mm, s.new_connector_length_mm)
+            res = auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
+                                s.new_connector_height_mm, s.new_connector_length_mm)
+            if res.dropped:
+                self.report({'WARNING'}, f"{res.dropped} connector position(s) did not fit and were dropped")
         try:
             result = build.build(context, obj)
         except build.BuildError as ex:
@@ -123,7 +125,7 @@ class SPLITFORGE_OT_validate(Operator):
     def execute(self, context):
         rep = validate.validate(stack_api.context_owner(context), context.scene)
         if rep.ok:
-            self.report({'INFO'}, "Mesh is ready: manifold, transforms applied, millimeter scene")
+            self.report({'INFO'}, "Mesh is ready: manifold, transforms applied, 1 unit = 1 mm")
         for m in rep.messages:
             self.report({'WARNING'}, m)
         return {'FINISHED'}
