@@ -305,6 +305,12 @@ Accurate +3–4 s; 삼각형 메시는 복사 없이 사용). 뮤테이션 15/15
 Ctrl+S가 핀 쪽 전환, 값 라벨 미번역, ko 버튼 항목·툴팁 삭제).
 알려진 제한: 민코프스키 폴백은 느릴 수 있음(16각 원뿔 20–40 s, 형상·크기별 1회 캐시); 별·원뿔 소켓의 DIFFERENCE는 EXACT_SELF가 비매니폴드라
 MANIFOLD로 폴백(검증 통과, 조립 공차 0.24); 오류/경고 메시지 본문(보고)은 영어.
+- 독립 검증(2026-10-10, verifier, develop d9f7225): `--gui` **전체** 6시나리오 ×2 PASS(p1_adjust_plane·p1_panel·p3_connector_click 포함, meshlib 변경 후),
+  헤드리스 39/39 ×2 PASS, `--slow`(5.2) PASS: 평면 Auto 14.15 s / Accurate 54.56 s, 타입 Auto 14.62 s / Accurate 47.45 s, S자 Auto 11.81 s / Accurate 45.67 s.
+  `extension validate` 성공, `extension build` 40파일(custom_socket 포함). 뮤테이션 4/4 검출(공차 비율 0 → 민코프스키 안 씀, 와인딩 Z축만, Export 자세 복원 제거,
+  ko `("Operator", "Distribute")` 삭제). 적대: 매트릭스 48빌드 관입 0·최소 여유 0.93c, 커스텀 14종 관입 0·여유 ≥ 0.96c(슬롯 0.250), 0.3 mm 판 누락 8/8 검출.
+  라이브 5.2 PASS(MANUAL_QA "Phase 3 후속 수정 라이브 검증"). 새 결함 D19(민코프스키 폴백 느림: 17면 원뿔 ~44 s, 진행 표시 없음, 중간~낮음); 낮음: Export 폴더
+  생성 예외 미처리(기존), 폴백 소켓 DIFFERENCE MANIFOLD 폴백.
 
 ### 백로그 (나중에, 사용자 결정 2026-10-10)
 

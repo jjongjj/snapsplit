@@ -391,11 +391,44 @@ headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p3v/`, 커밋 안 �
 
 ---
 
+## Phase 3 후속 수정 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-10, develop d9f7225)
+
+독립 검증자, 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa11/`, 같은 안전 규칙. Millimeters + Unit Scale 0.001. 재로드 36개 purge 후 enable.
+
+1. 도웰 배치(`qa11/scenario.py`): `QA10_Cube`(Z + S자, 8종) Rebuild 3.08 s, 경고 0. Settings > Dowel layout을 Flat → Upright → At assembly → Flat로
+   바꾸면 기존 도웰 파트가 즉시 이동: Flat = 원본 +X 면에서 5 mm, X축으로 눕혀 바닥 z −20; Upright = 같은 줄에 세움(높이 10/8 mm, 바닥 z −20);
+   조립 위치 = 소켓 안(Z 시임의 세로 도웰, S자 시임의 기울어진 도웰) [눕힘](qa/p3f_live_52_dowel_flat.png) [세움](qa/p3f_live_52_dowel_upright.png)
+   [조립](qa/p3f_live_52_dowel_assembled.png). 조립 위치 상태에서 Export STL → 도웰 STL의 bbox가 눕힌 자세와 같음(x −125..−115, z −20..−15),
+   내보낸 뒤 오브젝트 행렬은 조립 자세 그대로(차이 1e-7). 잘못된 폴더(파일 경로 아래)로 Export → `os.makedirs` 예외가 트레이스백으로 보고됨(try 이전, 기존 코드, 낮음),
+   도웰 위치는 바뀌지 않음.
+2. 커스텀 0.3 mm 슬롯 메시(`qa11/slot.py`, 이전 D17 재현): Z 컷 큐브에 핀 A/B(회전 45°) → Build 0.62 s(같은 형상 재빌드 0.03 s, 캐시), 경고 0,
+   "4x EXACT", 매니폴드, 조립(갭 닫음) 관입 0·여유 0.250(c 0.25). 이전 0.05 mm 간섭 해결.
+3. 한국어(인터페이스 번역 잠시 켬 → 원래 ko_KR·번역 끔으로 정확히 복원) [한국어](qa/p3f_live_52_ko_panel.png): "QA10_Cube의 파트", "1 단위 = 1 mm",
+   "틈 0.4 mm, 커넥터 4개", "스트로크: 점 118개", "뷰포트에서 다시 그리기", "Stroke 2에 배치", 버튼 "자동 배치"/"클릭". 툴팁: `pgettext_tip`이
+   Distribute 설명·Dowel layout 설명·도브테일 테이퍼 설명을 한국어로 반환(마우스 hover 표시는 MCP로 확인 불가).
+
+headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p3f/`, 커밋 안 함):
+- 커넥터 매트릭스 48빌드 재실행: 모두 매니폴드, 관통 0, 조립 관입 0, 최소 여유 0.2337(= 0.93c, 커스텀 육각 뿔대), 건너뜀 경고 이전과 같음.
+- 커스텀 14종: 모든 빌드 관입 0, 여유 ≥ 0.2395(0.96c) — 슬롯 0.250(이전 −0.05), 별 0.2395(이전 0.177), 원뿔 0.2395(이전 0.215). 경고 0.
+  **빌드 시간**: 뾰족한 원뿔(17면) 43.7 s / 뒤집은 원뿔 45.4 s, 별 8.8 s(민코프스키 폴백, 첫 계산; 같은 형상·크기·공차는 세션 캐시). 별·원뿔·고밀도 UV 구의
+  소켓 DIFFERENCE는 EXACT_SELF 비매니폴드 → MANIFOLD 폴백(정보 줄만; 조립 여유는 정상).
+- D16: 0.3 mm 판 셸 누락이 8개 위치 모두 검출(이전 6/8), 얇은 판·구 30개 정상 합침 승인, 24.8만 면 3축 적분 0.38 s.
+- 옛 .blend(레거시 + P2 스택) 열기 재확인: 오류 0, Rebuild·새 스택 Build 매니폴드.
+
+열린 항목:
+- [중간~낮음] D19: 민코프스키 폴백이 느림 — 17면 원뿔 하나가 ~44 s(Build, 그리고 같은 형상의 첫 Distribute/클릭 fit 검사 중 UI 정지), 크기·공차를 바꿀 때마다
+  다시 계산, 애드온 재로드 시 캐시 소실. 진행 표시·경고 없음. 제안: 모서리 원기둥/꼭짓점 구를 볼록한(오목 아닌) 곳만, 또는 먼저 합치기 조각 수 줄이기, 진행률.
+- [낮음] Export 폴더가 만들 수 없는 경로면 처리되지 않은 예외(트레이스백) — `os.makedirs`가 try 밖(Phase 1 코드).
+- [낮음] 별·원뿔 등 폴백 소켓의 파트 DIFFERENCE가 MANIFOLD로 폴백(경고 아님, 정보 줄).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
 | P3 후속(D17·D18·도웰 배치) | PASS (자동) | PASS (자동) | 2026-10-10 fix/p3-followups: `--gui` p3_connector_types 도웰 배치 전환(조립·세움·눕힘) [조립](qa/p3f_dowel_assembled_5.2.png) [세움](qa/p3f_dowel_upright_5.2.png); D17·D18은 헤드리스. 사람 확인 남음: 한국어 툴팁 문구, 실제 출력 시 커스텀 소켓 끼움 |
+| Phase 3 후속 수정 라이브(MCP) | — | PASS (새 결함 D19) | 2026-10-10 verifier, develop d9f7225: 도웰 배치 3종 전환·Export 눕힘·자세 복원, 0.3 mm 슬롯 커스텀 여유 0.250, 한국어 버튼·값 라벨·툴팁. `--gui` 전체 6×2·헤드리스 39/39 ×2·`--slow` PASS, 뮤테이션 4/4. 위 "Phase 3 후속 수정 라이브 검증" 절 |
 | Phase 3 커넥터 라이브(MCP) | — | PASS (결함 D17·D18) | 2026-10-10 verifier, develop f2a2f46: Z+S자 큐브에 8종(커스텀·도웰 2개 포함) Build 경고 0·매니폴드·조립 관입 0·여유 0.19–0.20(c 0.2), STL에 도웰 2개, 한국어 패널. `--gui` 6×2·헤드리스 38/38 ×2·`--slow` PASS, 뮤테이션 7/7. 위 "Phase 3 커넥터 라이브 검증" 절 |
 | QA-9 클릭 커넥터 배치 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p3-connectors: `--gui` p3_connector_click — 실제 클릭 3회·S·물체 밖 무시·실제 Ctrl+Z 3회 하나씩/Ctrl+Shift+Z 3회(모달 중과 끝난 뒤)·Build·파일 로드 `cancel()`. 사람 확인 남음: 프리뷰 가독성, 실제 마우스 감각 [프리뷰](qa/p3_click_preview_5.2.png) [배치](qa/p3_click_placed_5.2.png) [빌드](qa/p3_click_built_5.2.png) |
 | QA-10 커넥터 종류 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p3_connector_types — 8종 빌드(A, B, Dowel_1) [소켓](qa/p3_types_built_5.2.png) [핀](qa/p3_types_pins_5.2.png). 사람 확인 남음: 실제 출력 후 끼움 감각(공차·스냅 돌기 높이) |
