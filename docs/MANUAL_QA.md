@@ -1,7 +1,8 @@
 # 수동 검증 체크리스트 (GUI 전용)
 
 headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달·마우스·뷰포트 표시 항목.
-각 항목을 Blender 4.5와 5.2에서 각각 실행하고 결과 표에 날짜·버전·결과(OK/NG + 메모)를 적는다.
+각 항목을 Blender 5.2에서 실행하고 결과 표에 날짜·버전·결과(OK/NG + 메모)를 적는다(Phase 4부터 5.2 전용, 사용자 결정 2026-10-10;
+아래 표의 4.5 열은 Phase 3까지의 기록).
 
 ### 자동화 현황 (`python3 tests/run_tests.py --gui`)
 
@@ -16,6 +17,8 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 | `p2_build_progress` | QA-8: 13만 면 Suzanne에 스트로크 + X 평면 + Distribute, 모달 Build 중간에 **창 전체 스크린샷**(상태바 "SplitForge Build: … (n/m)"), 진행 단계(A/B 쪽, 커넥터) 마지막 = 합계, 4파트 매니폴드; 재빌드 중간 Esc → 이전 파트·메시 그대로, "Build cancelled" |
 | `p3_connector_click` | QA-9: Z 컷 큐브 위에서 본 뷰에서 `splitforge.connector_add_click` — 프리뷰(gpu 오버레이, 초록)가 커서 아래 시임 위치를 따라감, 모달 중 오브젝트·컬렉션 생성 없음, 실제 LMB 3회 = 커서 위치(±0.5 mm)에 커넥터 3개, S 후 클릭은 핀 쪽 B, 물체 밖 클릭은 무시, **실제 Ctrl+Z 3회로 하나씩 제거·Ctrl+Shift+Z 3회로 복원**(모달 중), Esc 후에도 클릭당 undo 1단계, Build 매니폴드, 파일 로드 → `cancel()`·핸들러 제거 |
 | `p3_connector_types` | QA-10: 180×30×30 막대에 Z 컷 + 8종 커넥터(원기둥 핀·사각 테논·도브테일·스냅 핀/테논/도브테일·커스텀 육각 메시·도웰) → Build: A, B, `GUI_Bar_Dowel_1`, 분리 스크린샷(위에서 소켓, 아래에서 핀) |
+| `p4_points` | QA-11: 정면 뷰에서 `splitforge.stack_add_polyline` — 실제 LMB 클릭 4번(점이 클릭 위치 ±0.5 mm, 날카로운 꼭짓점 그대로), 모달 중 **실제 Ctrl+Z**가 마지막 점 삭제, 다시 클릭, 비스듬한 뷰로 이동해도 프리뷰 유지, Enter → POLYLINE 컷, 끝난 뒤 실제 Ctrl+Z/Ctrl+Shift+Z(컷당 1단계), Esc/RMB 흔적 없음; 위 뷰에서 `stack_add_polygon`(깊이 10) 꼭짓점 4번 + **첫 점 클릭으로 닫기**, 도려내기 바닥에 `connector_add_click` 실제 클릭(바닥 위치), 모달 Build → 파트 3개(플러그·포켓 몸체·아래) 매니폴드, 분리 스크린샷, 점 찍는 중 파일 로드 → `cancel()` |
+| `p4_fix` | QA-12: 회전·스케일·뒤집힌 면·미터 씬 큐브. 사이드바 버튼을 hover 스캔으로 찾아 **실제 클릭**: Check Mesh → 법선 행의 Fix → 법선 바깥; 변환 Fix → 스케일 1·회전 0, 컷 평면(원점 밖)이 월드에서 그대로; **실제 Ctrl+Z/Ctrl+Shift+Z**; 단위 Fix → 대화상자에서 Enter(Keep Units) → Millimeters·0.001 |
 (레거시 시나리오 `qa1_preview_color`·`qa2_adjust`·`qa3_connectors`·`qa4_freehand`·`adjust_undo_wheel`·`conn_undo`·`load_adjust`·`load_conn`은
 레거시 코드와 함께 Phase 3에서 삭제. 해당 기능의 새 시나리오: QA-5 `p1_adjust_plane`(조정 모달·모달 중 undo·파일 로드), QA-7 `p2_stroke`(곡선 컷),
 QA-9 `p3_connector_click`(클릭 배치).)
@@ -40,6 +43,35 @@ QA-9 `p3_connector_click`(클릭 배치).)
   콘솔(Window > Toggle System Console)을 켜 두고 오류를 확인한다.
 
 ---
+
+## QA-11 폴리라인·폴리곤 컷 (`splitforge.stack_add_polyline` / `stack_add_polygon`, P4-1/P4-2 GUI)
+
+절차:
+1. 큐브(40 mm) 선택, 정면 뷰. Draft 컷 목록 옆 직선 아이콘(Add Polyline Cut). 큐브를 가로질러 점 4개를 클릭한다(한 번은 Ctrl을 누른 채).
+   Backspace(또는 Ctrl+Z)로 마지막 점을 지우고 다시 찍은 뒤 뷰를 돌려 보고 Enter.
+2. 위 뷰(Numpad 7)에서 원 아이콘(Add Polygon Cut). 윗면 위에 사각형 꼭짓점 4개를 찍고 첫 점을 다시 클릭해 닫는다. 컷 상자에서 Depth 10.
+3. Connectors 패널에서 Click → 도려낸 영역 안을 클릭, Enter. Build.
+4. 아무 점 컷이나 시작해 Esc / 우클릭.
+
+기대 결과:
+- 1단계: 클릭마다 점(주황)과 커서까지의 고무줄 선, 유효하면 리본 윤곽선이 보이고(커서를 움직여도 유지) 헤더에 점 개수·키 안내.
+  Ctrl 클릭은 화면에서 15° 단위 방향. 꼭짓점은 매끄럽게 되지 않는다. 확정하면 컷 목록에 "Polyline n".
+- 2단계: 첫 점 클릭으로 닫히며 "Polygon n" 추가, 오버레이에 프리즘(바닥은 깊이 10 위치).
+- 3단계: 커넥터가 바닥(윗면에서 10 mm 아래)에 놓이고, Build 결과는 플러그(위로 들어 올리면 핀) + 포켓이 있는 몸체 + 폴리라인 아래쪽.
+- 4단계: 컷·오브젝트가 생기지 않고 헤더 안내가 사라짐. 잘못된 점(자기 교차, 물체 밖)은 Enter 시 헤더와 보고에 이유.
+
+## QA-12 출력 검사와 Fix 버튼 (P4-3 GUI)
+
+절차:
+1. 기본 씬(미터)에서 큐브를 회전·스케일하고 Edit Mode에서 면 하나를 뒤집는다(Flip). Z 컷을 하나 추가하고 원점을 옮긴다.
+2. 패널 맨 위 Print checks에서 Check Mesh. 각 행의 Fix를 차례로 누른다(법선 → 변환 → 단위). 단위 대화상자에서 Keep Units / Keep Size 비교.
+3. 각 Fix 뒤 Ctrl+Z / Ctrl+Shift+Z.
+
+기대 결과:
+- 실패한 검사만 Fix 버튼, 문구가 잘리지 않음. 법선 Fix 뒤 행이 체크로 바뀜(메시 검사 다시 실행).
+- 변환 Fix 뒤 컷 평면이 화면에서 움직이지 않음(스택이 메시와 함께 변환), 정보 메시지에 적용한 스케일과 유지한 컷 수.
+- Keep Units: 숫자 그대로 mm로 표시, Keep Size: 실제 크기 유지(큐브가 1000배 단위로 커짐, 스케일 미적용 경고).
+- Ctrl+Z 한 번에 Fix 하나가 되돌려짐.
 
 ## QA-5 컷 평면 모달 조정 (`splitforge.cut_adjust_plane`, P1-4/P1-12 GUI)
 
@@ -427,6 +459,9 @@ headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p3f/`, 커밋 안 �
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| QA-11 폴리라인·폴리곤 컷 | — (5.2 전용) | PASS (자동) | 2026-10-10 feat/p4-final: `--gui` p4_points — 실제 클릭 4번·모달 중 Ctrl+Z 점 삭제·Enter·실제 Ctrl+Z/Ctrl+Shift+Z·Esc/RMB·첫 점 클릭으로 폴리곤 닫기·바닥 커넥터 클릭·모달 Build 3파트·파일 로드 `cancel()` [폴리라인](qa/p4_polyline_oblique_5.2.png) [폴리곤](qa/p4_polygon_preview_5.2.png) [빌드](qa/p4_built_apart_5.2.png). 사람 확인 남음: 점 찍기 감각, 프리뷰 가독성 |
+| QA-12 출력 검사·Fix | — (5.2 전용) | PASS (자동) | 2026-10-10: `--gui` p4_fix — 사이드바 실제 클릭: Check Mesh, 법선 Fix, 변환 Fix(컷 월드 위치 유지)·실제 Ctrl+Z/Ctrl+Shift+Z, 단위 Fix 대화상자 Enter [발견](qa/p4_fix_checks_found_5.2.png) [수정 후](qa/p4_fix_checks_fixed_5.2.png). 사람 확인 남음: 문구·대화상자 설명 |
+| D19·Export 폴더(Phase 3 후속 열린 항목) | — | PASS (headless) | 2026-10-10: D19 원뿔 소켓 17.4 s → 0.01 s, Distribute+Build 42 s → 0.08 s, 별·원뿔 소켓 DIFFERENCE 평범한 EXACT(폴백 없음); Export 폴더/파일 오류가 경로를 밝힌 ERROR(`test_custom_socket`, `test_export`) |
 | P3 후속(D17·D18·도웰 배치) | PASS (자동) | PASS (자동) | 2026-10-10 fix/p3-followups: `--gui` p3_connector_types 도웰 배치 전환(조립·세움·눕힘) [조립](qa/p3f_dowel_assembled_5.2.png) [세움](qa/p3f_dowel_upright_5.2.png); D17·D18은 헤드리스. 사람 확인 남음: 한국어 툴팁 문구, 실제 출력 시 커스텀 소켓 끼움 |
 | Phase 3 후속 수정 라이브(MCP) | — | PASS (새 결함 D19) | 2026-10-10 verifier, develop d9f7225: 도웰 배치 3종 전환·Export 눕힘·자세 복원, 0.3 mm 슬롯 커스텀 여유 0.250, 한국어 버튼·값 라벨·툴팁. `--gui` 전체 6×2·헤드리스 39/39 ×2·`--slow` PASS, 뮤테이션 4/4. 위 "Phase 3 후속 수정 라이브 검증" 절 |
 | Phase 3 커넥터 라이브(MCP) | — | PASS (결함 D17·D18) | 2026-10-10 verifier, develop f2a2f46: Z+S자 큐브에 8종(커스텀·도웰 2개 포함) Build 경고 0·매니폴드·조립 관입 0·여유 0.19–0.20(c 0.2), STL에 도웰 2개, 한국어 패널. `--gui` 6×2·헤드리스 38/38 ×2·`--slow` PASS, 뮤테이션 7/7. 위 "Phase 3 커넥터 라이브 검증" 절 |
