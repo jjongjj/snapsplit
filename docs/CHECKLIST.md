@@ -10,23 +10,23 @@
 
 ## Phase 0 — 테스트 하니스 + 베이스라인 + 위생
 
-- [ ] **P0-1 브랜치 준비**: `develop`을 `upstream/V_0.2.0_freehand`에서 생성.
+- [x] **P0-1 브랜치 준비**: `develop`을 `upstream/V_0.2.0_freehand`에서 생성.
   검증: `git branch --contains upstream/V_0.2.0_freehand | grep develop` 출력 있음. `git merge-base --is-ancestor master develop && echo ok` → `ok`.
-- [ ] **P0-2 .gitignore 수정**: `snapsplit/ops_split.py`, `/Tests/` 항목 제거(필요 시 `/Tests/`→`/tests/fixtures/*.blend1` 등으로 교체).
+- [x] **P0-2 .gitignore 수정**: `snapsplit/ops_split.py`, `/Tests/` 항목 제거(필요 시 `/Tests/`→`/tests/fixtures/*.blend1` 등으로 교체).
   검증: `git check-ignore -v tests/run_tests.py snapsplit/ops_split.py`의 exit code가 1(무시 안 됨).
-- [ ] **P0-3 하니스 골격**: `tests/run_tests.py`, `tests/blender_runner.py`, `tests/lib/__init__.py`, `tests/cases/test_register.py`(등록→해제→재등록, `SNAPSPLIT_OT_planar_split`·`SNAPSPLIT_OT_freehand_cut` 존재, `scene.snapsplit` 존재).
+- [x] **P0-3 하니스 골격**: `tests/run_tests.py`, `tests/blender_runner.py`, `tests/lib/__init__.py`, `tests/cases/test_register.py`(등록→해제→재등록, `SNAPSPLIT_OT_planar_split`·`SNAPSPLIT_OT_freehand_cut` 존재, `scene.snapsplit` 존재).
   검증: `python3 tests/run_tests.py --case test_register` → 두 버전 모두 `PASS`, exit 0. `python3 tests/run_tests.py --case test_register --blender "$BL52"`로 단일 버전 실행 가능.
-- [ ] **P0-4 실패가 실패로 보임**: 일부러 `assert False`인 케이스를 추가해 exit 1·트레이스백 출력 확인 후 제거.
+- [x] **P0-4 실패가 실패로 보임**: 일부러 `assert False`인 케이스를 추가해 exit 1·트레이스백 출력 확인 후 제거.
   검증: 임시 케이스 실행 시 종료코드 1, JSON 결과에 `"status":"FAIL"`과 `traceback` 키.
-- [ ] **P0-5 베이스라인 케이스**: `test_legacy_split_cube.py`(Z 2분할, 파트 2, 매니폴드, 원본 존재), `test_legacy_split_monkey.py`(구멍 메운 Suzanne, 캡 포함 매니폴드), `test_legacy_connectors.py`(CYL_PIN 3개 후 매니폴드), `test_units.py`(mm 씬에서 `unit_mm()==1.0`).
+- [x] **P0-5 베이스라인 케이스**: `test_legacy_split_cube.py`(Z 2분할, 파트 2, 매니폴드, 원본 존재), `test_legacy_split_monkey.py`(구멍 메운 Suzanne, 캡 포함 매니폴드), `test_legacy_connectors.py`(CYL_PIN 3개 후 매니폴드), `test_units.py`(mm 씬에서 `unit_mm()==1.0`).
   검증: `python3 tests/run_tests.py` → 4.5/5.2 모두 전체 PASS.
 - [ ] **P0-6 프리뷰 재질 버그 수정**: `build_orange_preview_material`에서 `shadow_method`·`blend_method`를 `hasattr` 가드. 케이스 `test_preview_material.py`(함수 호출 시 예외 없음, 재질 반환).
   검증: 케이스 PASS 4.5/5.2. GUI: "Show split preview" 켜면 주황 평면이 보임(4.5, 5.2 각각 메모).
-- [ ] **P0-7 로깅**: `snapsplit/core/log.py` 추가, `print("[SnapSplit DEBUG]…")` 전부 `log.debug`로 치환. 프리퍼런스 `debug_log` Bool(기본 False).
+- [x] **P0-7 로깅**: `snapsplit/core/log.py` 추가, `print("[SnapSplit DEBUG]…")` 전부 `log.debug`로 치환. 프리퍼런스 `debug_log` Bool(기본 False).
   검증: `grep -rn "SnapSplit DEBUG" snapsplit/ | wc -l` → `0`. 기본 설정으로 P0-5 실행 시 stdout에 `DEBUG` 문자열 없음(`python3 tests/run_tests.py --case test_legacy_split_monkey | grep -c DEBUG` → `0`).
-- [ ] **P0-8 수동 검증 체크리스트 문서**: `docs/MANUAL_QA.md`에 GUI 전용 항목(모달 조정, 클릭 배치, freehand 스트로크) 절차 작성.
+- [x] **P0-8 수동 검증 체크리스트 문서**: `docs/MANUAL_QA.md`에 GUI 전용 항목(모달 조정, 클릭 배치, freehand 스트로크) 절차 작성.
   검증: 파일 존재, 각 항목에 "절차/기대 결과" 두 줄 이상.
-- [ ] **P0-9 느린 테스트 옵션**: `--slow` 시 51만 면 Suzanne 3분할 + 핀 3개 케이스 실행, 시간 로그.
+- [x] **P0-9 느린 테스트 옵션**: `--slow` 시 51만 면 Suzanne 3분할 + 핀 3개 케이스 실행, 시간 로그.
   검증: `python3 tests/run_tests.py --slow --case test_perf_large --blender "$BL52"` PASS, 출력에 `split_s=`·`connectors_s=` 수치.
 
 ## Phase 1 — MVP: 평면 컷 스택 + Build + 핀/소켓 + Export
