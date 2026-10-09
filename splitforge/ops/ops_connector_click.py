@@ -10,8 +10,9 @@ size) follows the cursor, green where the seam lies inside the object, red
 elsewhere. LMB places a connector there if it fits in 3D (inside the object
 with MIN_WALL_MM of material, not across another cut or its own curved seam,
 connectors/fit.py), otherwise the header says why. S flips the pin side for the
-next clicks; Enter, Esc or RMB end the placement. View navigation passes
-through, and so do Ctrl+Z / Ctrl+Shift+Z.
+next clicks; Enter, Esc or RMB end the placement. Only plain S / LMB are taken:
+with Ctrl, Alt, Shift or Cmd held (Ctrl+Z / Ctrl+Shift+Z undo, Ctrl+S save,
+Alt+LMB navigation) the event passes through, as does view navigation.
 
 Undo: every placed connector is its own undo step (``ed.undo_push`` after each
 click), so Ctrl+Z removes them one by one. The operator therefore has no UNDO
@@ -293,12 +294,13 @@ class SPLITFORGE_OT_connector_add_click(Operator):
             self.report({'INFO'}, msg)
             log.info(msg)
             return {'FINISHED'}
-        if event.type == 'S' and event.value == 'PRESS':
+        plain = not (event.ctrl or event.alt or event.shift or event.oskey)
+        if event.type == 'S' and event.value == 'PRESS' and plain:
             self._side = 'B' if self._side == 'A' else 'A'
             self._message = ""
             self._update(context, obj, cut, event)
             return {'RUNNING_MODAL'}
-        if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and inside_region and not event.alt:
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and inside_region and plain:
             self._update(context, obj, cut, event)
             if self._last is None:
                 self._message = "Click on the seam of the cut"
@@ -315,8 +317,9 @@ class SPLITFORGE_OT_connector_add_click(Operator):
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             self._update(context, obj, cut, event)
             return {'PASS_THROUGH'}
-        if event.type == 'Z' and (event.ctrl or event.oskey):
-            # Undo/redo of placed connectors (one step each); data is looked up again next event
+        if not plain:
+            # Ctrl+Z / Ctrl+Shift+Z (one placed connector per step; data is looked up again next event),
+            # Ctrl+S, Alt+LMB view navigation, ...: Blender handles them
             self._message = ""
             return {'PASS_THROUGH'}
         if (event.type in {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}

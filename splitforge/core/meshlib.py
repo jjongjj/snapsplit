@@ -101,58 +101,148 @@ def bm_volume(bm):
 # Grid of the ray integration in winding_volume (rays per bbox side); offsets avoid mesh-aligned rays
 WINDING_GRID = 96
 _WINDING_JITTER = (0.3819660, 0.6180340)
+_WINDING_SKEW = (7.31e-4, 5.27e-4)
 
 
-def winding_volume(bm, grid=WINDING_GRID, bounds=None):
+class _Triangles:
+    """A triangle mesh (the bmesh itself, or a triangulated copy) with a BVH (its indices are the
+    triangles') and, per triangle on demand, its corners (coordinates and vertex indices). Call free()
+    when done."""
+
+    def __init__(self, bm):
+        from mathutils.bvhtree import BVHTree
+        # A triangle mesh is used as it is (no copy of a large mesh); otherwise a triangulated copy
+        self.owned = any(len(f.verts) != 3 for f in bm.faces)
+        self.bm = bm.copy() if self.owned else bm
+        if self.owned:
+            self.bm.normal_update()   # n-gons are triangulated in their plane: normals must be current
+            bmesh.ops.triangulate(self.bm, faces=self.bm.faces[:])
+        self.bm.verts.index_update()
+        self.bm.faces.ensure_lookup_table()
+        self.bvh = BVHTree.FromBMesh(self.bm) if self.bm.faces else None
+        self._cache = {}
+
+    def face(self, index):
+        """((a, b, c) coordinates, corner vertex index set) of triangle ``index``."""
+        hit = self._cache.get(index)
+        if hit is None:
+            vs = self.bm.faces[index].verts
+            hit = self._cache[index] = (tuple(v.co.copy() for v in vs), frozenset(v.index for v in vs))
+        return hit
+
+    def free(self):
+        if self.owned:
+            self.bm.free()
+
+
+def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, tris=None):
     """Volume of the region a mesh encloses with winding number > 0 (overlaps counted once).
 
-    Integrates along ``grid`` x ``grid`` parallel rays (+Z) over the XY bounds
-    (``bounds`` = (x0, x1, y0, y1, z0), default the mesh's): every surface
-    crossing changes the winding number by +-1 (by the face normal), and the
-    ray length where it is positive is summed. For intersecting shells this is
-    the volume of their union, independent of any boolean solver; it is a
-    sampled estimate (comparable between meshes only on the same ``bounds``).
-    Inward-facing cavity shells subtract as they should.
+    Integrates along ``grid`` x ``grid`` parallel rays along ``axis`` (0/1/2 =
+    X/Y/Z, slightly skewed so no ray runs inside an axis-aligned face) over the
+    bounds of the other two axes (``bounds`` = (mins, maxs), default the
+    mesh's, see bm_box). Every crossing of a ray with the surface changes the
+    winding number by +-1 (by the face normal) and the ray length where it is
+    positive is summed. All crossings of all rays are found at once (the rays
+    as thin strips in a BVH overlapped with the mesh's, then exact ray-triangle
+    intersections), so coincident faces of overlapping pieces each count; a
+    crossing reported twice because the ray passes through an edge or vertex
+    shared by two faces counts once. For intersecting shells this is the volume
+    of their union, independent of any boolean solver; it is a sampled estimate
+    (comparable between meshes only on the same ``bounds`` and axis). Cavity
+    shells subtract as they should. A shell thinner than the ray spacing across
+    the rays can slip between them: compare along all three axes
+    (winding_volumes).
     """
     from mathutils.bvhtree import BVHTree
+    from mathutils.geometry import intersect_ray_tri
     if not bm.faces:
         return 0.0
-    if bounds is None:
-        bounds = bm_bounds(bm)
-    x0, x1, y0, y1, z0 = bounds
-    dx, dy = (x1 - x0) / grid, (y1 - y0) / grid
-    if dx <= 0.0 or dy <= 0.0:
+    mins, maxs = bounds if bounds is not None else bm_box(bm)
+    u, w = [k for k in range(3) if k != axis]
+    du, dw = (maxs[u] - mins[u]) / grid, (maxs[w] - mins[w]) / grid
+    if du <= 0.0 or dw <= 0.0:
         return 0.0
-    bvh = BVHTree.FromBMesh(bm)
-    scale = max(x1 - x0, y1 - y0, 1e-9)
-    start_z = z0 - 0.01 * scale
-    eps = 1e-7 * scale
-    up = Vector((0.0, 0.0, 1.0))
-    total = 0.0
+    if tris is None:
+        tris = _Triangles(bm)
+        try:
+            return winding_volume(bm, grid, bounds, axis, tris)
+        finally:
+            tris.free()
+    if tris.bvh is None:
+        return 0.0
+    scale = max(maxs[k] - mins[k] for k in range(3)) or 1e-9
+    start = mins[axis] - 0.01 * scale
+    span = (maxs[axis] - mins[axis]) + 0.02 * scale
+    direction = Vector((0.0, 0.0, 0.0))
+    direction[axis] = 1.0
+    direction[u], direction[w] = _WINDING_SKEW
+    direction.normalize()
+    side = Vector((0.0, 0.0, 0.0))
+    side[u] = 1e-5 * scale
+    span /= direction[axis]
+    bases, strip_verts, strips = [], [], []
     for i in range(grid):
-        x = x0 + (i + _WINDING_JITTER[0]) * dx
+        cu = mins[u] + (i + _WINDING_JITTER[0]) * du
         for j in range(grid):
-            origin = Vector((x, y0 + (j + _WINDING_JITTER[1]) * dy, start_z))
-            winding, inside_from, length = 0, None, 0.0
-            last_z, last_sign = None, 0
-            for _ in range(100000):
-                hit, normal, _index, _dist = bvh.ray_cast(origin, up)
-                if hit is None:
-                    break
-                sign = -1 if normal.z > 0.0 else 1      # entering a solid: normal against the ray
-                # The same crossing reported twice (ray through a shared edge or vertex)
-                if not (last_z is not None and sign == last_sign and hit.z - last_z < 10.0 * eps):
-                    before = winding
-                    winding += sign
-                    if before <= 0 < winding:
-                        inside_from = hit.z
-                    elif winding <= 0 < before and inside_from is not None:
-                        length += hit.z - inside_from
-                        inside_from = None
-                    last_z, last_sign = hit.z, sign
-                origin = Vector((origin.x, origin.y, hit.z + eps))
-            total += length
-    return total * dx * dy
+            base = Vector((0.0, 0.0, 0.0))
+            base[u], base[w], base[axis] = cu, mins[w] + (j + _WINDING_JITTER[1]) * dw, start
+            k = len(strip_verts)
+            strip_verts += [base, base + direction * span, base + side]
+            strips.append((k, k + 1, k + 2))
+            bases.append(base)
+    rays = BVHTree.FromPolygons(strip_verts, strips, all_triangles=True)
+    hits = {}
+    for ray, index in rays.overlap(tris.bvh):
+        (a, b, c), _corners = tris.face(index)
+        p = intersect_ray_tri(a, b, c, direction, bases[ray], False)
+        if p is None:
+            continue
+        facing = (b - a).cross(c - a).dot(direction)
+        if abs(facing) < 1e-18:
+            continue
+        hits.setdefault(ray, []).append(((p - bases[ray]).dot(direction), -1 if facing > 0.0 else 1, index))
+    eps = 1e-6 * scale
+    total = 0.0
+    for crossings in hits.values():
+        crossings.sort()
+        winding, inside_from, length = 0, None, 0.0
+        kept = []
+        for t, sign, face in crossings:
+            if any(abs(t - t2) < eps and sign == s2
+                   and (face == f2 or not tris.face(face)[1].isdisjoint(tris.face(f2)[1]))
+                   for t2, s2, f2 in kept[-4:]):
+                continue          # the same crossing through a shared edge / vertex (or two triangles of one face)
+            kept.append((t, sign, face))
+            before = winding
+            winding += sign
+            if before <= 0 < winding:
+                inside_from = t
+            elif winding <= 0 < before and inside_from is not None:
+                length += t - inside_from
+                inside_from = None
+        total += length
+    return total * du * dw * direction[axis]
+
+
+def winding_volumes(bm, bounds=None, grid=WINDING_GRID):
+    """winding_volume along X, Y and Z: a thin shell missed by one ray family is crossed by the others."""
+    if not bm.faces:
+        return (0.0, 0.0, 0.0)
+    bounds = bounds if bounds is not None else bm_box(bm)
+    tris = _Triangles(bm)
+    try:
+        return tuple(winding_volume(bm, grid, bounds, axis, tris) for axis in range(3))
+    finally:
+        tris.free()
+
+
+def bm_box(bm):
+    """((min x, y, z), (max x, y, z)) of the vertices."""
+    xs = [v.co.x for v in bm.verts]
+    ys = [v.co.y for v in bm.verts]
+    zs = [v.co.z for v in bm.verts]
+    return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
 
 
 def bm_bounds(bm):

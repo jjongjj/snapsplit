@@ -892,6 +892,24 @@ def p3_build_and_lift(name, lift=14.0):
     return named(f"p3_build_{name}", step)
 
 
+def p3_check_dowel(layout):
+    """The bar's dowel part sits where the layout puts it (its connector is at u = 77 on the Z cut, lifted A)."""
+    def step():
+        d = bpy.data.objects["GUI_Bar_Dowel_1"]
+        pts = [d.matrix_world @ v.co for v in d.data.vertices]
+        lo = Vector([min(p[i] for p in pts) for i in range(3)])
+        hi = Vector([max(p[i] for p in pts) for i in range(3)])
+        center, size = (lo + hi) / 2, hi - lo
+        if layout == 'ASSEMBLED':
+            ok = (center - Vector((77.0, 0.0, 0.0))).length < 0.01 and abs(size.z - 14.0) < 0.05
+        elif layout == 'UPRIGHT':
+            ok = abs(size.z - 14.0) < 0.05 and abs(lo.z + 15.0) < 1e-3 and lo.x > 90.0
+        else:
+            ok = abs(size.x - 14.0) < 0.05 and abs(lo.z + 15.0) < 1e-3 and lo.x > 90.0
+        check(f"dowel layout {layout}: placed", ok, (tuple(round(c, 2) for c in center), tuple(round(c, 2) for c in size)))
+    return step
+
+
 def p3_setup_types():
     """A 180 x 30 x 30 bar, Z cut, one connector of every type along it; dowels lie beside it."""
     with override():
@@ -1107,7 +1125,13 @@ SCENARIOS = {
                                              Euler((math.radians(115), 0.0, math.radians(20))).to_quaternion())),
          named("zoom", lambda: setattr(view3d()[1].spaces.active.region_3d, "view_distance",
                                        view3d()[1].spaces.active.region_3d.view_distance * 0.6)),
-         wait, screenshot("pins_from_below")]
+         wait, screenshot("pins_from_below"),
+         # Dowel layouts: the dowel moves into its sockets (assembly preview), upright, and back flat
+         named("dowel_assembled", lambda: sf().__setattr__("dowel_layout", 'ASSEMBLED')), set_oblique_view(0.9),
+         named("check_dowel_assembled", p3_check_dowel('ASSEMBLED')), wait, screenshot("dowel_assembled"),
+         named("dowel_upright", lambda: sf().__setattr__("dowel_layout", 'UPRIGHT')),
+         named("check_dowel_upright", p3_check_dowel('UPRIGHT')), wait, screenshot("dowel_upright"),
+         named("dowel_flat", lambda: sf().__setattr__("dowel_layout", 'FLAT')), named("check_dowel_flat", p3_check_dowel('FLAT'))]
     ),
 }
 

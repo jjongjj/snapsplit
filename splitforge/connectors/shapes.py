@@ -24,8 +24,8 @@ Clearance is applied per face, perpendicular to it (a mitered offset, never
 a scale): prisms grow by the clearance on every side; tapered faces by
 clearance / cos(taper angle) at a given height, so the gap measured normal to
 the slanted face is the clearance; snap dimples by the clearance in radius; a
-custom mesh is offset along its vertex normals (scaled by the shell factor, as
-Solidify's even thickness). The socket follows the pin as it sits after
+custom mesh is grown by the clearance in every direction (connectors/custom_socket.py:
+vertex-normal offset when that is clean, else a Minkowski sum; checked). The socket follows the pin as it sits after
 assembly: the pin part moves by the gap towards the socket part, so tapered
 sockets and snap dimples are shifted by the gap.
 
@@ -38,7 +38,7 @@ embed fraction; L = length; c = clearance):
 - dowel: no pin; both parts get a socket of depth L/2 + c, and the dowel is a
   separate part (``Solids.dowel``).
 
-Pure mathutils/bmesh; no Blender data-blocks.
+Pure mathutils/bmesh, except the custom socket (connectors/custom_socket.py, temporary booleans).
 """
 
 import math
@@ -65,8 +65,6 @@ ALL_KINDS = ROUND_KINDS | RECT_KINDS | {'CUSTOM'}
 # Largest taper (fraction of the base width the tip loses) and chamfer share
 MAX_TAPER = 0.6
 MAX_CHAMFER_SHARE = 0.45
-# Custom mesh offset: largest shell factor (sharp corners would shoot out)
-MAX_SHELL_FACTOR = 3.0
 
 
 def profile_of(kind):
@@ -354,19 +352,6 @@ def _custom_local(shape, width, height, length, z_base, s):
     return [Vector((x * width, sigma * y * height, z_base - s * z * length)) for x, y, z in shape.verts]
 
 
-def _offset(verts, faces, distance):
-    """Vertices moved outward by ``distance`` along their normals, scaled by the shell factor."""
-    bm = bmesh.new()
-    try:
-        bv = [bm.verts.new(v) for v in verts]
-        for f in faces:
-            bm.faces.new([bv[i] for i in f])
-        bm.normal_update()
-        return [v.co + v.normal * distance * min(v.calc_shell_factor(), MAX_SHELL_FACTOR) for v in bm.verts]
-    finally:
-        bm.free()
-
-
 # ---------------------------------------------------------------------------
 # Connector -> solids
 # ---------------------------------------------------------------------------
@@ -377,6 +362,7 @@ class Solids:
     pin_socket: list = field(default_factory=list)   # DIFFERENCE on the pin part (dowel)
     socket: list = field(default_factory=list)       # DIFFERENCE on the socket part
     dowel: tuple = None                              # (diameter, length, chamfer) of a separate dowel part
+    notes: list = field(default_factory=list)        # warnings about the geometry (custom socket clearance)
 
     def all(self):
         return self.pin + self.pin_socket + self.socket
@@ -418,10 +404,14 @@ def connector_solids(spec, pin_positive=None):
     z_sock0, z_sock1 = s * (hg + 0.1 * L), -s * (hg + (1.0 - e) * L + c)
 
     if kind == 'CUSTOM':
+        from . import custom_socket
         shape = spec.custom
         verts = _custom_local(shape, spec.width, spec.height, L, z_base, s)
-        sock = [v - Vector((0.0, 0.0, s * spec.gap)) for v in _offset(verts, shape.faces, c)]
-        return Solids(pin=[MeshSolid(verts, shape.faces, m)], socket=[MeshSolid(sock, shape.faces, m)])
+        step = max(min(spec.width, spec.height, L) / 16.0, 1e-6)
+        sock, sock_faces, _got, note = custom_socket.socket(verts, shape.faces, c, step)
+        sock = [v - Vector((0.0, 0.0, s * spec.gap)) for v in sock]
+        return Solids(pin=[MeshSolid(verts, shape.faces, m)], socket=[MeshSolid(sock, sock_faces, m)],
+                      notes=[note] if note else [])
 
     profile = profile_of(kind)
     hu = spec.width * 0.5

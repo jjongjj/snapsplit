@@ -109,11 +109,13 @@ def run(ctx):
     cls.modal(op, mctx, event('LEFTMOUSE', 'PRESS', screen(18.6, 0.0)))
     assert len(conns()) == 3 and "break through the surface" in area.header, area.header
     assert any("Does not fit here" in m for _l, m in reports), reports
-    # Navigation and undo keys pass through
+    # Navigation and modified keys pass through: Ctrl+Z, Ctrl+S (no pin-side flip), Alt+LMB (no placement)
     assert cls.modal(op, mctx, event('MIDDLEMOUSE')) == {'PASS_THROUGH'}
-    z = event('Z')
-    z.ctrl = True
-    assert cls.modal(op, mctx, z) == {'PASS_THROUGH'}
+    for key, mod in (('Z', 'ctrl'), ('S', 'ctrl'), ('S', 'oskey'), ('LEFTMOUSE', 'alt'), ('LEFTMOUSE', 'shift')):
+        e = event(key, 'PRESS', screen(-12.0, -12.0))
+        setattr(e, mod, True)
+        assert cls.modal(op, mctx, e) == {'PASS_THROUGH'}, (key, mod)
+    assert len(conns()) == 3 and "pin side B" in area.header, (len(conns()), area.header)
     # ed.undo between events (what Ctrl+Z does): one click per step, the modal keeps going
     bpy.ops.ed.undo()
     assert len(conns()) == 2

@@ -8,6 +8,7 @@ Z cut (gap 0) + one RECT_TENON 8 x 4 x 10 at (0, 0):
 - width / height / length / clearance edits -> section sizes and depths follow;
 - pin side B -> the other part carries the tenon;
 - type -> DOVETAIL: tapered section; insert depth -> pin protrudes (1 - e) x L;
+- tip chamfer: 45-degree bevel over the chamfer length, tip height kept, socket not chamfered;
 - an edit followed by ed.undo restores the previous value and Rebuild geometry.
 """
 
@@ -105,6 +106,20 @@ def run(ctx):
     (w_hi, _h, _x, _y), = boxes(meshlib, p["A"], -1.0)
     (w_lo, _h, _x, _y), = boxes(meshlib, p["A"], -6.0)
     assert w_lo < w_hi - 0.5, ("dovetail narrows towards the tip", w_hi, w_lo)
+
+    # Tip chamfer (cylinder pin 6 x 10, tip at z = -5): 45 degrees over 1 mm, full width above it;
+    # the socket stays a full cylinder
+    c = conn()
+    c.kind, c.width_mm, c.length_mm, c.chamfer_mm, c.clearance_mm = 'CYL_PIN', 6.0, 10.0, 1.0, 0.2
+    p = rebuild()
+    for z, width in ((-4.5, 5.0), (-4.01, 2 * (2.0 + 0.99)), (-3.5, 6.0), (-1.0, 6.0)):
+        (w, _h, _x, _y), = boxes(meshlib, p["A"], z)
+        lib.assert_close(w, width, abs_=0.02, msg=f"chamfered pin width at z={z}")
+    (w, _h, _x, _y), = boxes(meshlib, p["B"], -4.5)
+    lib.assert_close(w, 6.4, abs_=0.02, msg="socket not chamfered")
+    assert boxes(meshlib, p["A"], -4.99) and not boxes(meshlib, p["A"], -5.01), "tip still at -5"
+    c = conn()
+    c.kind, c.width_mm, c.chamfer_mm = 'DOVETAIL', 6.0, 0.0
 
     # Undo restores an edit (and the rebuilt geometry follows the restored value)
     bpy.ops.ed.undo_push(message="before width")
