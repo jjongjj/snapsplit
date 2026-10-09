@@ -99,7 +99,9 @@ def run(ctx):
     col = new_cube("PGT")
     assert add(SQUARE) == {'FINISHED'}
     col.splitforge_stack.cuts[0].gap_mm = 0.4
-    build.build(bpy.context, col)
+    res = build.build(bpy.context, col)
+    # the pair check (A + B + gap ring = piece) passes on the first, exact attempt
+    assert [b[1] for b in res.booleans] == ['EXACT', 'EXACT'] and not res.warnings, (res.booleans, res.warnings)
     a, b = bpy.data.objects["PGT_A"], bpy.data.objects["PGT_B"]
     assert lib.is_manifold(a) and lib.is_manifold(b)
     lib.assert_close(lib.volume(a), 19.6 ** 2 * 40.0, rel=0.005, msg="column")

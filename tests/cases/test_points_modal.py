@@ -103,6 +103,20 @@ def run(ctx):
     assert len(op.points) == 4, "redo keeps the clicked points"
     uid = cut.uid
 
+    # --- orbiting between clicks: later clicks land on the plane of the first click's view -------
+    from mathutils import Euler
+    op, reports = new_op(pl, 'POLYLINE')
+    click(pl, op, screen(-30.0, 1.0))
+    tilted = lib.FakeView(Euler((math.radians(70.0), 0.0, math.radians(25.0))).to_quaternion(),
+                          center=(5.0, 0.0, 0.0), scale=0.1)
+    tctx = lib._Context(window_manager=lib._WindowManager(), area=area, region=tilted.region, region_data=tilted)
+    assert pl.modal(op, tctx, event('LEFTMOUSE', 'PRESS', tuple(tilted.to_region((30.0, 0.0, -1.0))))) == \
+        {'RUNNING_MODAL'}
+    p = op._world[-1]
+    assert abs(p[0] - 30.0) < 0.06 and abs(p[1]) < 1e-5 and abs(p[2] + 1.0) < 0.06, ("not on the first plane", p)
+    assert tuple(round(c, 6) for c in op._dir) == (0.0, 1.0, 0.0), op._dir
+    assert pl.modal(op, tctx, event('ESC')) == {'CANCELLED'}
+
     # --- Ctrl: 15 degree steps on screen --------------------------------------------------------
     a = screen(-25.0, 0.0)
     b = (a[0] + 200.0, a[1] + 61.0)                # 16.96 degrees -> 15
