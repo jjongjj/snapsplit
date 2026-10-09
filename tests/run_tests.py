@@ -9,7 +9,7 @@ the JSON reports and prints a summary. Exit code 0 only if every selected case
 passed in every Blender version.
 
 Usage:
-    python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow]
+    python3 tests/run_tests.py [--blender EXE]... [--all-versions] [--case PATTERN]... [--slow]
                                 [--gui [--gui-only] [--gui-scenario NAME]...]
 
 ``--gui`` additionally runs the modal-operator scenarios in ``tests/gui/gui_runner.py``
@@ -17,8 +17,10 @@ Usage:
 with simulated input; screenshots go to ``tests/_out/gui/``. Takes a few minutes;
 windows pop up and must not be touched while they run.
 
-Default Blender executables are BL45 and BL52 below (override with the
-environment variables of the same name). Windows executables are supported from
+SplitForge supports Blender 5.2 only (user decision 2026-10-10): the default
+executable is BL52 below. ``--all-versions`` also runs BL45 (Blender 4.5, kept as an
+optional regression signal, not a supported version); ``--blender`` picks any
+executables (override the defaults with the environment variables of the same name). Windows executables are supported from
 WSL: paths handed to them are converted with ``wslpath -w``.
 
 Blender runs with TEMP/TMP/TMPDIR set to ``tests/_out/tmp`` (forwarded through
@@ -212,7 +214,9 @@ def run_gui(exe, scenario, timeout):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--blender", action="append", default=[],
-                    help="Blender executable (repeatable). Default: BL45 and BL52.")
+                    help="Blender executable (repeatable). Default: BL52 (Blender 5.2, the supported version).")
+    ap.add_argument("--all-versions", action="store_true",
+                    help="Also run BL45 (Blender 4.5; optional, unsupported).")
     ap.add_argument("--case", action="append", default=[],
                     help="Case name or glob, e.g. test_register or 'test_legacy_*' (repeatable).")
     ap.add_argument("--slow", action="store_true", help="Also run slow cases (SLOW = True).")
@@ -227,7 +231,9 @@ def main():
                     help="With --gui: skip the headless cases.")
     args = ap.parse_args()
 
-    exes = args.blender or [BL45, BL52]
+    exes = list(args.blender) or [BL52]
+    if args.all_versions and BL45 not in exes:
+        exes.insert(0, BL45)
     missing = [e for e in exes if not os.path.isfile(e)]
     if missing:
         print("Blender executable not found: " + ", ".join(missing), file=sys.stderr)

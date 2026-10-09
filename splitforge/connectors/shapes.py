@@ -408,8 +408,14 @@ def connector_solids(spec, pin_positive=None):
         shape = spec.custom
         verts = _custom_local(shape, spec.width, spec.height, L, z_base, s)
         step = max(min(spec.width, spec.height, L) / 16.0, 1e-6)
-        sock, sock_faces, _got, note = custom_socket.socket(verts, shape.faces, c, step)
-        sock = [v - Vector((0.0, 0.0, s * spec.gap)) for v in sock]
+        # The socket is computed (and cached) in a canonical frame -- base at z = 0, pin side +1 -- and
+        # moved rigidly: the other pin side is a 180 degree turn about X (_custom_local), the gap and
+        # the insert depth a shift along Z; the assembled pin sits the gap further towards the socket
+        canon = _custom_local(shape, spec.width, spec.height, L, 0.0, 1.0)
+        sock, sock_faces, _got, note = custom_socket.socket(canon, shape.faces, c, step, shape.name)
+        turn = Matrix.Identity(3) if s > 0.0 else Matrix.Rotation(math.pi, 3, 'X')
+        shift = Vector((0.0, 0.0, z_base - s * spec.gap))
+        sock = [turn @ v + shift for v in sock]
         return Solids(pin=[MeshSolid(verts, shape.faces, m)], socket=[MeshSolid(sock, sock_faces, m)],
                       notes=[note] if note else [])
 

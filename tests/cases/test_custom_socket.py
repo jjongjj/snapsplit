@@ -105,6 +105,51 @@ def assembled_clearance(ctx, build, cube):
     return worst
 
 
+def d19_speed(ctx, custom_socket, shapes_mod):
+    """D19: the Minkowski fallback is fast, cached across pin sides / gap / insert depth, and shows a
+    wait status only on the slow (non-convex) path."""
+    import time
+    progress = ctx.module("core.progress")
+    knobs = {"cone": bpy.data.objects["K_cone"], "star": bpy.data.objects["K_star"]}
+    limits = {"cone": 1.0, "star": 6.0}      # before: 17.4 s / 3.4 s per socket, 43-45 s / 8.8 s per Build
+    for key, knob in knobs.items():
+        bm = bmesh.new()
+        bm.from_mesh(knob.data)
+        shape = shapes_mod.custom_shape(bm, knob.name)[0]
+        bm.free()
+        busy = []
+        progress.listeners.append(lambda done, total, text: busy.append(text) if total == 0 else None)
+        try:
+            custom_socket._CACHE.clear()
+            t0 = time.time()
+            specs = []
+            for side, gap, embed in ((True, 0.4, 0.5), (False, 0.4, 0.5), (True, 1.0, 0.3)):
+                spec = ctx.module("connectors.apply").ConnectorSpec(
+                    label="", matrix=shapes_mod.Matrix(), kind='CUSTOM', width=W, height=W, length=L, clearance=C,
+                    gap=gap, pin_positive=side, custom=shape, embed=embed)
+                specs.append(shapes_mod.connector_solids(spec))
+            dt = time.time() - t0
+        finally:
+            progress.listeners.pop()
+        assert len(custom_socket._CACHE) == 1, (key, "socket computed per side/gap/depth", len(custom_socket._CACHE))
+        assert dt < limits[key], (key, dt)
+        # convex cone: hull, no slow path; star: one busy status for its first socket
+        assert (len(busy) == 0) if key == "cone" else (len(busy) == 1 and "K_star" in busy[0]), (key, busy)
+        # the moved socket encloses the moved pin with the clearance (both sides, other gap/depth)
+        for solids in specs:
+            pin, sock = solids.pin[0], solids.socket[0]
+            sbm = bmesh.new()
+            sock.add_to(sbm)
+            bvh = BVHTree.FromBMesh(sbm)
+            sbm.free()
+            gap = 0.4 if solids is not specs[2] else 1.0
+            s = 1.0 if solids is not specs[1] else -1.0
+            fit = ctx.module("connectors.fit")
+            worst = min(fit.depth_inside(bvh, p - Vector((0.0, 0.0, s * gap))) for p in pin.samples(0.5))
+            assert worst >= 0.9 * C, (key, worst)
+        ctx.metric(f"d19_{key}_s", round(dt, 3))
+
+
 def run(ctx):
     build = ctx.module("cuts.build")
     custom_socket = importlib.import_module(ctx.addon_module + ".connectors.custom_socket")
@@ -113,10 +158,10 @@ def run(ctx):
     for key, knob in shapes().items():
         cube, res = build_with(build, f"Sk_{key}", knob)
         assert not res.warnings, (key, res.warnings)
-        # The pin (a clean user mesh) unites with plain EXACT; the socket boolean may need a fallback
-        # solver for the Minkowski socket (star), but never the voxel remesh
-        assert all(b[1] == 'EXACT' for b in res.booleans if "union" in b[0]), (key, res.booleans)
-        assert all(b[1] and b[1] != 'VOXEL' for b in res.booleans), (key, res.booleans)
+        # The pin (a clean user mesh) and the socket (hull / offset / convex-piece Minkowski sum, no
+        # degenerate slivers) both take plain EXACT: the old prism + cylinder + ball sum left hundreds of
+        # zero-area triangles and its DIFFERENCE fell back EXACT_SELF -> MANIFOLD for the star and cone
+        assert all(b[1] == 'EXACT' for b in res.booleans), (key, res.booleans)
         ctx.metric(f"{key}_solvers", ",".join(b[1] for b in res.booleans))
         for part in (f"Sk_{key}_A", f"Sk_{key}_B"):
             assert lib.is_manifold(bpy.data.objects[part]), (key, part)
@@ -136,6 +181,8 @@ def run(ctx):
         if key in ("slot", "star", "cone"):
             assert plain < 0.9 * C, (key, "the plain offset was enough; test not meaningful", plain)
         ctx.metric(key, f"assembled {got:.3f} (plain offset {plain:.3f})")
+
+    d19_speed(ctx, custom_socket, shapes_mod)
 
     # Solids built straight into a bmesh carry no normals yet: concave n-gons (the L's caps) must still be
     # triangulated correctly -- the L is not self-intersecting and unites cleanly
