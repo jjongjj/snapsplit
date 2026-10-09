@@ -10,8 +10,10 @@ For a 0.3 mm slot, a 5-pointed star, a cone with a sharp tip, an L and a plain b
 Build has no warnings, both parts are manifold, and with the gap closed every point of the pin
 that enters the socket part is at least 0.9 x clearance away from its material. For the slot,
 star and cone the plain offset alone would not reach 0.9 x clearance (why the fallback exists).
-A mesh too detailed for the Minkowski fallback (> MINKOWSKI_MAX_TRIS) with a fine slot builds
-with a warning naming the clearance share it keeps (and asking to simplify the mesh).
+A mesh too detailed for the Minkowski fallback (> MINKOWSKI_MAX_TRIS) with a fine slot (offset
+folds) or a dense star (offset loses clearance) builds with a warning naming the clearance share it
+keeps (and asking to simplify the mesh). Solids built into a bmesh without normals: a concave L is
+not reported as self-intersecting and unites cleanly (n-gons triangulated with current normals).
 """
 
 import importlib
@@ -134,6 +136,37 @@ def run(ctx):
         if key in ("slot", "star", "cone"):
             assert plain < 0.9 * C, (key, "the plain offset was enough; test not meaningful", plain)
         ctx.metric(key, f"assembled {got:.3f} (plain offset {plain:.3f})")
+
+    # Solids built straight into a bmesh carry no normals yet: concave n-gons (the L's caps) must still be
+    # triangulated correctly -- the L is not self-intersecting and unites cleanly
+    apply = ctx.module("connectors.apply")
+    boolean = ctx.module("core.boolean")
+    lknob = bpy.data.objects["K_L"]
+    bm = bmesh.new()
+    bm.from_mesh(lknob.data)
+    lshape = shapes_mod.custom_shape(bm, "K_L")[0]
+    bm.free()
+    solid = bmesh.new()
+    shapes_mod.MeshSolid(shapes_mod._custom_local(lshape, W, W, L, 5.0, 1.0), lshape.faces,
+                         shapes_mod.Matrix()).add_to(solid)
+    assert not apply._self_intersects(solid), "a plain L reported as self-intersecting"
+    united, why = boolean.unite_bm(solid)
+    assert united is not None, why
+    united.free()
+    solid.free()
+
+    # Too detailed for the Minkowski fallback, offset unites but loses clearance at the star's notches:
+    # built, with a warning naming the share of the clearance it keeps
+    star = bmesh.new()
+    star.from_mesh(bpy.data.objects["K_star"].data)
+    side = [e for e in star.edges if abs(e.verts[0].co.z - e.verts[1].co.z) > 1e-6]
+    bmesh.ops.subdivide_edges(star, edges=side, cuts=200)
+    bmesh.ops.triangulate(star, faces=star.faces[:])
+    assert len(star.faces) > custom_socket.MINKOWSKI_MAX_TRIS, len(star.faces)
+    knob = mesh_object("K_dense_star", star)
+    cube, res = build_with(build, "Sk_dense_star", knob)
+    assert any("keeps only" in w and "% of the clearance" in w for w in res.warnings), res.warnings
+    ctx.metric("dense_star_warning", res.warnings[0])
 
     # Too detailed for the Minkowski fallback: built, with a warning about the clearance it keeps
     dense = prism([(-3, 0), (3, 0), (3, 10), (0.15, 10), (0.15, 6), (-0.15, 6), (-0.15, 10), (-3, 10)])
