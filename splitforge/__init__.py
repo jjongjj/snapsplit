@@ -53,7 +53,7 @@ from . import ops_connectors
 from . import ops_align
 from . import ops_freehand
 from .model import props as model_props
-from .ops import ops_stack, ops_cut_plane, ops_connector, ops_build, ops_export
+from .ops import ops_stack, ops_cut_plane, ops_cut_stroke, ops_connector, ops_build, ops_export
 from .ui import overlay as ui_overlay
 from .ui import panel as ui_panel
 from .ui import legacy as ui_legacy  # "Legacy" sub-panel of the main panel (until Phase 3)
@@ -73,6 +73,7 @@ _modules = [
     model_props,
     ops_stack,
     ops_cut_plane,
+    ops_cut_stroke,
     ops_connector,
     ops_build,
     ops_export,

@@ -911,6 +911,246 @@ def sf_select_cube():
         cube.select_set(True)
 
 
+# --- P2: stroke (curved) cuts, modal Build with progress ---------------------------------
+
+STROKE_OP = "SPLITFORGE_OT_stack_add_stroke"
+BUILD_OP = "SPLITFORGE_OT_build"
+
+
+def p2_setup_monkey(levels=0):
+    """Filled Suzanne (eyes = separate shells intersecting the head), front view, overlays on."""
+    def step():
+        with override():
+            for o in list(bpy.data.objects):
+                bpy.data.objects.remove(o)
+            setup_scene_mm()
+            bpy.ops.mesh.primitive_monkey_add('EXEC_DEFAULT', True, size=40.0)
+            obj = bpy.context.active_object
+            obj.name = "GUI_Monkey"
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.fill_holes(sides=0)
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.object.mode_set(mode='OBJECT')
+            if levels:
+                m = obj.modifiers.new("subsurf", 'SUBSURF')
+                m.levels = levels
+                bpy.ops.object.modifier_apply(modifier=m.name)
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            sf().show_overlay = True
+            bpy.ops.ed.undo_push(message="gui: monkey")
+        set_shading_solid(overlays=True)
+        STATE["monkey_faces"] = len(obj.data.polygons)
+        STATE["objects_before"] = sorted(o.name for o in bpy.data.objects)
+        check("Suzanne manifold", is_manifold(obj))
+    return named(f"p2_setup_monkey_{levels}", step)
+
+
+def monkey():
+    return bpy.data.objects.get("GUI_Monkey")
+
+
+def monkey_cuts():
+    return monkey().splitforge_stack.cuts
+
+
+def monkey_parts():
+    return sorted(o.name for o in bpy.data.objects if o.get("splitforge_source") == "GUI_Monkey")
+
+
+def stroke_state():
+    return mod("ops.ops_cut_stroke")
+
+
+def front_xy(x, z):
+    """Window position of a point on the plane y = 0 (front view)."""
+    return lambda: world_to_window((x, 0.0, z))
+
+
+def s_stroke_steps(z0=-7.0, amp=2.5, n=16, shift=False, x0=-28.0, x1=28.0):
+    """LMB drag along an S (world x0..x1 at height z0 +- amp), one MOUSEMOVE per step."""
+    pts = [(x0 + (x1 - x0) * i / (n - 1), z0 + amp * math.sin(2 * math.pi * i / (n - 1))) for i in range(n)]
+    steps = [move(front_xy(*pts[0])), key('LEFTMOUSE', 'PRESS', front_xy(*pts[0]))]
+    steps += [move(front_xy(*p)) for p in pts[1:]]
+    steps.append(key('LEFTMOUSE', 'RELEASE', front_xy(*pts[-1]), shift=shift))
+    return steps
+
+
+def invoke_with(idname, **props):
+    def step():
+        STATE["out_mark"] = output_mark()
+        event('MOUSEMOVE', 'NOTHING', region_center())
+        with override():
+            group, name = idname.split(".")
+            ret = getattr(getattr(bpy.ops, group), name)('INVOKE_DEFAULT', True, **props)
+        check(f"{idname} invoked {props}", ret == {'RUNNING_MODAL'}, ret)
+    return named(f"invoke_{idname}", step)
+
+
+def p2_check_preview():
+    st = stroke_state()
+    lines = st._PREVIEW["lines"]
+    check("stroke preview: stroke + ribbon lines drawn from plain data", len(lines) >= 4, len(lines))
+    check("stroke preview: valid stroke (orange, not red)", lines and lines[0][0][1] > 0.3, lines[0][0] if lines else None)
+    check("stroke modal running", STROKE_OP in modal_ops(), modal_ops())
+
+
+def p2_check_committed(n_cuts, points=None):
+    def step():
+        cuts = monkey_cuts()
+        check(f"Enter added a STROKE cut ({n_cuts} cuts)", len(cuts) == n_cuts and cuts[-1].kind == 'STROKE',
+              [(c.name, c.kind) for c in cuts])
+        if points is not None:
+            check(f"stroke has {points} points", len(cuts[-1].points) == points, len(cuts[-1].points))
+        else:
+            check("stroke stored (prepared, many points)", len(cuts[-1].points) > 20, len(cuts[-1].points))
+        check("direction = view direction (+Y)", tuple(round(c, 4) for c in cuts[-1].direction) == (0.0, 1.0, 0.0),
+              tuple(cuts[-1].direction))
+        st = stroke_state()
+        check("modal ended, draw handler removed", STROKE_OP not in modal_ops() and st._HANDLE is None
+              and not st._RUNNING, (modal_ops(), st._HANDLE, st._RUNNING))
+    return named(f"p2_check_committed_{n_cuts}", step)
+
+
+def p2_check_unchanged(what, n_cuts):
+    def step():
+        st = stroke_state()
+        check(f"{what}: no cut added", len(monkey_cuts()) == n_cuts, len(monkey_cuts()))
+        check(f"{what}: objects unchanged", sorted(o.name for o in bpy.data.objects) == STATE["objects_before"],
+              sorted(o.name for o in bpy.data.objects))
+        check(f"{what}: modal ended, handler removed",
+              STROKE_OP not in modal_ops() and st._HANDLE is None and not st._RUNNING and not st._PREVIEW["lines"],
+              (modal_ops(), st._HANDLE, st._RUNNING))
+    return named(f"p2_check_unchanged_{what}", step)
+
+
+def p2_record_uid():
+    STATE["stroke_uid"] = monkey_cuts()[0].uid
+    STATE["stroke_points"] = [tuple(p.co) for p in monkey_cuts()[0].points]
+
+
+def p2_check_redrawn():
+    cut = monkey_cuts()[0]
+    check("Redraw kept the uid", cut.uid == STATE["stroke_uid"], (cut.uid, STATE["stroke_uid"]))
+    check("Redraw replaced the points", [tuple(p.co) for p in cut.points] != STATE["stroke_points"])
+
+
+def p2_check_colour(off, on, what, factor):
+    def step():
+        a = warm_pixels(STATE["shots"][off])
+        b = warm_pixels(STATE["shots"][on])
+        log(f"warm pixels {off}={a:.4f} {on}={b:.4f}")
+        check(f"{what} visible (warm pixels {on} > {factor} x {off})", b > a + 0.001 and b > factor * a,
+              f"{a:.4f} -> {b:.4f}")
+    return named(f"p2_colour_{on}", step)
+
+
+def p2_wait_build(limit=600):
+    """Wait (one runner step each) until the modal Build ended."""
+    def step():
+        if BUILD_OP in modal_ops() and STATE.get("build_wait", 0) < limit:
+            STATE["build_wait"] = STATE.get("build_wait", 0) + 1
+            STATE["i"] -= 1          # run this step again
+            return
+        STATE["build_wait"] = 0
+        check("modal Build ended", BUILD_OP not in modal_ops(), modal_ops())
+    return named("p2_wait_build", step)
+
+
+def p2_check_built(n_parts):
+    def step():
+        parts = monkey_parts()
+        check(f"Build: {n_parts} parts", len(parts) == n_parts, parts)
+        for n in parts:
+            check(f"{n} manifold", is_manifold(bpy.data.objects[n]))
+        check("source hidden", monkey().hide_get())
+        STATE["parts_meshes"] = {n: bpy.data.objects[n].data.name for n in parts}
+    return named(f"p2_check_built_{n_parts}", step)
+
+
+def p2_listen():
+    STATE["progress"] = []
+    mod("core.progress").listeners.append(lambda done, total, text: STATE["progress"].append((done, total, text)))
+
+
+def p2_window_shot(name):
+    def step():
+        if not ARGS.shots:
+            return
+        path = os.path.join(ARGS.shots, f"{ARGS.scenario}_{ARGS.label}_{name}.png")
+        win = view3d()[0]
+        with bpy.context.temp_override(window=win, screen=win.screen):
+            bpy.ops.screen.screenshot(filepath=path)
+        REPORT["screenshots"].append(path)
+        STATE["shots"][name] = path
+        STATE.setdefault("shot_progress", {})[name] = list(STATE.get("progress", []))
+    return named(f"window_shot_{name}", step)
+
+
+def p2_when_mid_build(action, name, limit=400):
+    """Repeat each runner tick until the modal Build has done some but not all steps, then ``action``."""
+    def step():
+        steps = [p for p in STATE.get("progress", []) if p[2]]
+        mid = BUILD_OP in modal_ops() and steps and steps[-1][0] < steps[-1][1]
+        if not mid and BUILD_OP in modal_ops() and STATE.get("mid_wait", 0) < limit:
+            STATE["mid_wait"] = STATE.get("mid_wait", 0) + 1
+            STATE["i"] -= 1
+            return
+        STATE["mid_wait"] = 0
+        check(f"{name}: caught the Build mid-way", mid, steps[-1:] if steps else None)
+        if mid:
+            action()
+    return named(f"mid_build_{name}", step)
+
+
+def p2_check_progress():
+    steps = [p for p in STATE["progress"] if p[2]]
+    check("progress steps reported (cut sides, connectors)",
+          any("side A" in t for _d, _t, t in steps) and any("connectors" in t for _d, _t, t in steps),
+          [t for _d, _t, t in steps][:12])
+    check("last step == total", steps and steps[-1][0] == steps[-1][1], steps[-3:])
+    during = STATE.get("shot_progress", {}).get("building", [])
+    check("window screenshot taken while the build was running (some steps done, not all)",
+          during and 0 < during[-1][0] < steps[-1][1], (during[-1:] if during else None, steps[-1:]))
+
+
+def p2_separate_parts():
+    """Lift part A (above the S) so the curved seam faces show in the screenshot."""
+    for n in monkey_parts():
+        if n.endswith("_A"):
+            bpy.data.objects[n].location.z += 10.0
+
+
+def p2_show_source():
+    """Back to the source for more strokes (parts stay); remember the objects present now."""
+    with override():
+        monkey().hide_set(False)
+        bpy.context.view_layer.objects.active = monkey()
+    STATE["objects_before"] = sorted(o.name for o in bpy.data.objects)
+
+
+def p2_check_cancelled_build():
+    check("Esc ended the modal Build", BUILD_OP not in modal_ops(), modal_ops())
+    parts = monkey_parts()
+    check("Esc mid-build: previous parts untouched",
+          {n: bpy.data.objects[n].data.name for n in parts} == STATE["parts_meshes"], parts)
+    check("reported 'Build cancelled'", printed("Build cancelled", STATE["out_mark"]))
+    steps = [p for p in STATE["progress"] if p[2]]
+    check("Esc came mid-build (some steps done, not all)", steps and steps[-1][0] < steps[-1][1], steps[-2:])
+
+
+def p2_add_plane_and_connectors():
+    with override():
+        bpy.ops.splitforge.stack_add_plane('EXEC_DEFAULT', True, axis='X', offset_mm=3.0)
+        for i in range(len(monkey_cuts())):
+            monkey().splitforge_stack.active_index = i
+            bpy.ops.splitforge.connector_add_auto('EXEC_DEFAULT', True)
+        STATE["n_connectors"] = sum(len(c.connectors) for c in monkey_cuts())
+    check("Distribute put connectors on the stroke and the plane cut",
+          all(len(c.connectors) > 0 for c in monkey_cuts()), [len(c.connectors) for c in monkey_cuts()])
+
+
 SCENARIOS = {
     "qa1_preview_color": [
         setup_cube, qa1_select_cube, set_oblique_view(1.3), wait, screenshot("preview_off"),
@@ -1035,6 +1275,71 @@ SCENARIOS = {
         + [sf_check("Clear removed the parts and shows the source",
                     lambda: (not sf_parts() and not bpy.data.objects["GUI_Cube"].hide_get(), sf_parts())),
            sf_no_overlay_errors]
+    ),
+    "p2_stroke": (
+        [p2_setup_monkey(0), set_oblique_view(1.5), wait, screenshot("before"), set_view('FRONT', 1.3), wait]
+        # Draw an S through the muzzle (below the eyes) in the front view; the ribbon preview is
+        # shown from an oblique view (navigation while the modal waits for Enter), then Enter
+        + [invoke("splitforge.stack_add_stroke"), wait] + s_stroke_steps()
+        + [wait, p2_check_preview, screenshot("stroke_front"), set_oblique_view(1.5), wait,
+           screenshot("stroke_preview"),
+           p2_check_colour("before", "stroke_preview", "stroke + ribbon preview", 1.3),
+           key('RET'), wait, p2_check_committed(1), wait, screenshot("committed"),
+           p2_check_colour("before", "committed", "stroke cut overlay (ribbon surface)", 2.0),
+           set_view('FRONT', 1.3), wait]
+        # Real Ctrl+Z / Ctrl+Shift+Z: one undo step per stroke cut
+        + [ctrl_key('Z'), wait,
+           named("undo_removed", lambda: check("Ctrl+Z removed the stroke cut", len(monkey_cuts()) == 0,
+                                               len(monkey_cuts()))),
+           ctrl_key('Z', shift=True), wait,
+           named("redo_added", lambda: check("Ctrl+Shift+Z re-added it", len(monkey_cuts()) == 1,
+                                             len(monkey_cuts())))]
+        # Build (modal, progress): 2 manifold parts, the eyes stay whole (info)
+        + [invoke("splitforge.build"), wait, p2_wait_build(), wait, p2_check_built(2),
+           named("shell_info", lambda: check("info: eyes not crossed stay whole",
+                                             printed("2 separate shell(s)", STATE["out_mark"]))),
+           set_oblique_view(1.6), p2_separate_parts, sf_overlay(False), wait, screenshot("built_apart"),
+           sf_overlay(True), set_view('FRONT', 1.3)]
+        # Esc / RMB leave nothing
+        + [p2_show_source,
+           invoke("splitforge.stack_add_stroke"), wait] + s_stroke_steps(z0=-4.0)
+        + [wait, key('ESC'), wait, p2_check_unchanged("Esc", 1)]
+        + [invoke("splitforge.stack_add_stroke"), wait] + s_stroke_steps(z0=-4.0)
+        + [wait] + click('RIGHTMOUSE', front_xy(0.0, 25.0)) + [wait, p2_check_unchanged("RMB", 1)]
+        # Shift at release: straight axis line (2 points, horizontal in the front view)
+        + [invoke("splitforge.stack_add_stroke"), wait] + s_stroke_steps(z0=2.0, amp=1.5, shift=True)
+        + [wait, key('RET'), wait, p2_check_committed(2, points=2),
+           named("shift_level", lambda: check("Shift snapped the line level (normal = Z)",
+                                              abs(abs(monkey_cuts()[1].normal[2]) - 1.0) < 1e-4,
+                                              tuple(monkey_cuts()[1].normal)))]
+        # Redraw the first stroke (same uid, new points)
+        + [named("active0", lambda: setattr(monkey().splitforge_stack, "active_index", 0)), p2_record_uid,
+           named("redraw", lambda: invoke_with("splitforge.stack_add_stroke",
+                                               replace_uid=STATE["stroke_uid"])())]
+        + [wait] + s_stroke_steps(z0=-9.0, amp=1.5)
+        + [wait, key('RET'), wait, p2_check_redrawn, screenshot("redrawn")]
+        # File load while drawing -> cancel() removes the handler
+        + [invoke("splitforge.stack_add_stroke"), wait] + s_stroke_steps(z0=-4.0)
+        + [wait, load_homefile, wait,
+           named("load_cancel", lambda: check("file load: stroke modal cancelled, handler removed",
+                                              STROKE_OP not in modal_ops() and stroke_state()._HANDLE is None
+                                              and not stroke_state()._RUNNING,
+                                              (modal_ops(), stroke_state()._HANDLE))),
+           sf_no_overlay_errors]
+    ),
+    "p2_build_progress": (
+        [p2_setup_monkey(4), set_view('FRONT', 1.3), wait]
+        + [invoke("splitforge.stack_add_stroke"), wait] + s_stroke_steps(z0=2.0, amp=3.0)
+        + [wait, key('RET'), wait, p2_check_committed(1), p2_add_plane_and_connectors, p2_listen,
+           set_oblique_view(1.4)]
+        # Modal Build with progress: a full-window screenshot while it runs (status bar text)
+        + [invoke("splitforge.build"), p2_when_mid_build(p2_window_shot("building"), "screenshot"),
+           p2_wait_build(), wait, p2_check_built(4), p2_check_progress, p2_window_shot("built")]
+        # Esc in the middle of a rebuild keeps the previous parts
+        + [named("relisten", lambda: STATE.__setitem__("progress", [])),
+           named("change_gap", lambda: setattr(monkey_cuts()[0], "gap_mm", 0.5)),
+           invoke("splitforge.build"), p2_when_mid_build(key('ESC'), "Esc"), wait, p2_wait_build(), wait,
+           p2_check_cancelled_build, sf_no_overlay_errors]
     ),
     "adjust_undo_wheel": (
         [setup_cube, push_settings_change, invoke("snapsplit.adjust_split_axis"),

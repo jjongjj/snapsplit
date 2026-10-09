@@ -25,7 +25,7 @@ from bpy.types import PropertyGroup
 from ..core import naming
 from ..profiles import MATERIAL_PROFILES
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # 2: STROKE cuts (points, direction)
 
 CONNECTOR_KINDS = [
     ('CYL_PIN', "Cylinder pin", "Round pin; width is the diameter", 'MESH_CYLINDER', 0),
@@ -78,12 +78,32 @@ class SPLITFORGE_PG_Connector(PropertyGroup):
                                 description="Socket clearance per side; -1 uses the scene default")
 
 
+class SPLITFORGE_PG_Point(PropertyGroup):
+    """One point of a stroke polyline (object local space)."""
+    co: FloatVectorProperty(name="Point", size=3, subtype='TRANSLATION')
+
+
+CUT_KINDS = [
+    ('PLANE', "Plane", "Planar cut", 'MESH_PLANE', 0),
+    ('STROKE', "Stroke", "Curved cut: a drawn stroke extruded along the view direction", 'CURVE_BEZCURVE', 1),
+]
+
+
 class SPLITFORGE_PG_Cut(PropertyGroup):
-    """One planar cut of the stack."""
+    """One cut of the stack: a plane, or a stroke ribbon (points + direction).
+
+    For a STROKE cut ``origin``/``normal``/``tangent`` hold the seam frame at
+    the middle of the stroke (display only); the cut itself is ``points``
+    swept along ``direction``.
+    """
     uid: StringProperty(name="ID", description="Stable identifier written onto built parts")
     enabled: BoolProperty(name="Enabled", default=True, update=_redraw)
-    kind: EnumProperty(name="Kind", items=[('PLANE', "Plane", "Planar cut", 'MESH_PLANE', 0)],
-                       default='PLANE')
+    kind: EnumProperty(name="Kind", items=CUT_KINDS, default='PLANE', update=_redraw)
+    points: CollectionProperty(type=SPLITFORGE_PG_Point,
+                               description="Stroke polyline (object local space), STROKE cuts only")
+    direction: FloatVectorProperty(name="Direction", size=3, default=(0.0, 1.0, 0.0), subtype='XYZ',
+                                   update=_redraw,
+                                   description="Extrusion direction of the stroke (object local space)")
     origin: FloatVectorProperty(name="Origin", size=3, subtype='TRANSLATION', update=_redraw,
                                 description="A point on the cut plane (object local space)")
     normal: FloatVectorProperty(name="Normal", size=3, default=(0.0, 0.0, 1.0), subtype='XYZ',
@@ -136,6 +156,8 @@ class SPLITFORGE_PG_Settings(PropertyGroup):
         ('X', "X", "World X"), ('Y', "Y", "World Y"), ('Z', "Z", "World Z")])
     easy_offset_mm: FloatProperty(name="Offset (mm)", default=0.0, precision=2,
                                   description="Distance of the cut from the object's bounding box center")
+    easy_gap_mm: FloatProperty(name="Gap (mm)", default=0.0, min=0.0, soft_max=5.0, precision=2,
+                               description="Material removed along an Easy cut (kerf)")
     easy_connector_count: IntProperty(name="Connectors", default=2, min=0, max=16,
                                       description="Pins added along the seam (0 = none)")
     export_directory: StringProperty(name="Folder", subtype='DIR_PATH', default="//parts/")
@@ -144,6 +166,7 @@ class SPLITFORGE_PG_Settings(PropertyGroup):
 
 
 classes = (
+    SPLITFORGE_PG_Point,
     SPLITFORGE_PG_Connector,
     SPLITFORGE_PG_Cut,
     SPLITFORGE_PG_CutStack,

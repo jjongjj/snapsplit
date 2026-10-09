@@ -87,20 +87,73 @@
 
 ## Phase 2 — 곡선 컷 + 불리언 폴백 + 진행률
 
-- [ ] **P2-1 core/boolean.py**: `run_boolean(target, cutter, op, solver='AUTO')` — EXACT→FAST→voxel remesh→실패 보고, 결과 검증(면>0, 매니폴드, 부피 양수).
-  검증: `test_boolean.py` — 큐브−구 DIFFERENCE 매니폴드; 의도적 비매니폴드 커터(면 하나 제거) → `result.method in {FAST, VOXEL}` 또는 `ok=False`와 메시지, 원본 불변; 폴백 시 로그에 `fallback=` 기록. PASS.
-- [ ] **P2-2 cuts/stroke.py 순수 함수**: `build_stroke_cutter(points_2d, region, rv3d, bbox, gap_mm) -> (H_plus_mesh, H_gap_mesh)`; headless는 합성 `region_data`(view matrix, 직교) 로 호출.
-  검증: `test_stroke_cutter.py` — 직교 Front 뷰에서 S자 점 30개 → 두 커터 메시 매니폴드, 부피 > 0, 커터 bbox가 원본 bbox 포함. 점 2개(직선) 입력은 평면 컷 결과와 부피 오차 1% 이내. PASS.
-- [ ] **P2-3 곡선 컷 빌드 통합**: `kind=STROKE` 컷이 build에서 2회 DIFFERENCE로 파트 2개 생성, gap 반영.
-  검증: `test_stroke_build.py` — 큐브에 S자 컷 → 파트 2개 매니폴드, 부피 합 = 원본 − 갭(허용 5%), 두 파트 bbox가 서로 겹치지 않음(갭 축 기준). Suzanne(매니폴드)도 PASS.
-- [ ] **P2-4 스트로크 모달 오퍼레이터** `stack_add_stroke`(ops_freehand의 입력·gpu 드로잉 발췌, 점은 `SNAP_PG_Cut.points`에 저장, 커터는 숨김 컬렉션 오브젝트로 생성).
-  검증: GUI(4.5, 5.2) — 그리기→Enter → 스택에 STROKE 항목, 커터 오브젝트 `_SnapSplit_Cutters`에 존재, Build 시 두 파트. Esc 취소 시 오브젝트·핸들러 잔존 없음(`bpy.data.objects` 수 동일). `docs/qa/p2_stroke_<ver>.png`.
-- [ ] **P2-5 곡선 시임 위 커넥터**: 스트로크 컷의 시임 프레임을 커터 리본의 중앙 점·법선으로 정의, 커넥터 (u,v)는 리본 파라미터(길이 방향 u, 깊이 방향 v).
-  검증: `test_stroke_connectors.py` — S자 컷 + CYL_PIN 2개 → 매니폴드, 핀 파트 부피 증가, 핀 축이 리본 로컬 법선과 평행(각도 < 2°). PASS.
-- [ ] **P2-6 진행률**: `core/progress.py` — `wm.progress_*` + 상태바 텍스트; Build는 단계 수를 미리 계산해 `step()`.
-  검증: `test_progress.py` — 빌드 중 progress 콜백 호출 횟수 == 예상 단계 수(컷 수×2 + 커넥터 그룹 수). GUI: 51만 면 메시 빌드 시 커서 진행률·상태바 텍스트 보임.
-- [ ] **P2-7 대형 메시 성능**: `--slow` 케이스에 51만 면 S자 컷 추가, 상한 120s(5.2).
-  검증: `python3 tests/run_tests.py --slow --blender "$BL52"` PASS, 시간 기록.
+곡선 컷 방식(PLAN 7-5, 2026-10-09 사용자 결정): **뷰 투영 리본** — 그린 2D 스트로크를 뷰 방향으로 압출한 곡면(쿠키 커터,
+컷 면이 뷰 방향과 평행). 컷 레코드에는 뷰와 무관한 형태(오브젝트 로컬 폴리라인 + 압출 방향)로 저장해 Build가 뷰포트 없이 재현한다.
+컷이 지나가지 않는 별도 셸(Suzanne 눈)은 자기 쪽 파트에 통째로 들어가고 정보 메시지를 낸다(평면 컷과 동일, freehand의 거부 없음).
+
+- [x] **P2-1 core/boolean.py**: `apply(target, operand_bm, op, preference)` / `apply_bm(bm, …)` — EXACT → EXACT(자기교차) → MANIFOLD(4.5+) →
+  FAST/FLOAT → 복셀 리메시(대각/200) 후 EXACT(자기교차), 결과 검증(면>0, 매니폴드, 연산별 부피 범위: UNION은 증가 ≤ 피연산자 부피,
+  DIFFERENCE는 감소 ≤ 피연산자 부피, INTERSECT ≤ 입력, 호출자 `expect` 범위), 전부 실패 시 대상 불변 + 시도별 이유.
+  곡선 컷은 추가로 **쌍 검증**(A + B + 갭 부피 = 조각 ± 4 %, 갭 부피 = 갭 × 양쪽 시임 면적/2)이 맞지 않으면 다음 솔버로 둘 다 다시.
+  검증: `test_boolean.py` — 큐브−구 EXACT 매니폴드·제거 부피; 열린(비매니폴드) 커터는 어느 솔버가 처리하거나 `ok=False`+메시지·대상 불변;
+  `_evaluate` 실패 주입으로 체인 순서(EXACT→EXACT_SELF→MANIFOLD→float→VOXEL), 로그 `fallback=`, 전부 실패 시 메시지·대상 불변,
+  부피 손실 결과 거부, bmesh 경로에 임시 데이터 0, Suzanne에서 EXACT 빈 결과 → EXACT_SELF 성공. PASS 4.5/5.2.
+  **원인 규명(이전 "큰 Suzanne 중간 파트에서 EXACT 부피 손실 → MANIFOLD 폴백")**: 구멍 메운 Suzanne의 눈 셸 2개가 머리 셸과 교차한다
+  (51만 면에서 삼각형 쌍 780개 겹침, 겹친 부피 1.2–1.7 %). EXACT를 `use_self=False`로 쓰면 자기교차 입력에서 빈/잘못된 메시를 낸다
+  (실측: 504면·51만 면 모두 DIFFERENCE 결과 면 0). `use_self=True`면 정확하다(눈/머리 겹침을 합친 부피). Build는 소스 셸끼리 교차하면
+  체인을 EXACT_SELF부터 시작한다.
+- [x] **P2-2 cuts/stroke.py 순수 함수**: `prepare_points`(투영·중복 제거·등간격 리샘플·라플라시안 스무딩), `build_cutter(points, direction, corners, gap)
+  -> StrokeCutter`(`remove_for_a/remove_for_b/positive_solid/slab/ribbon`), `Centerline`(시임 프레임), `points_from_view(region, rv3d, …)`.
+  (체크리스트 원안의 `build_stroke_cutter(points_2d, region, rv3d, …)` 대신 뷰 의존 부분을 `points_from_view`로 분리 — 저장·재빌드가 뷰와 무관.)
+  검증: `test_stroke_cutter.py` — 합성 직교 Front 뷰(`tests/lib FakeView`)에서 S자 30점 → 4개 솔리드 매니폴드·부피>0·깊이 범위가 원본 포함,
+  두 제거 솔리드 합집합 bbox ⊇ 원본, 제거 솔리드 부피 합 = 커터 상자 + 슬랩(1e-6), 슬랩 = 갭×길이×깊이(1 %), 점 2개는 평면 리본(1e-5),
+  축 스냅, 거부 메시지 5종(짧음, 자기교차, 연장선 교차, 갭보다 급한 굽힘, 갭보다 가까이 되돌아옴). PASS 4.5/5.2.
+  "점 2개 = 평면 컷 부피 1 % 이내"는 Build 수준에서 확인(`test_stroke_build`).
+- [x] **P2-3 곡선 컷 빌드 통합**: `kind=STROKE` 컷은 조각마다 DIFFERENCE 2회(리본이 닿는 조각만, 아닌 조각은 통째로 자기 쪽), gap 반영, Easy 포함.
+  검증: `test_stroke_build.py` — 큐브 S자(gap 0.5) → 매니폴드 2파트, 부피 합 = 64000 − 갭 부피(1 % 이내, 실측 0.02 %), A가 양(+n) 쪽,
+  파트끼리 관입 없음 + 최소 거리 ≥ 0.9×갭(체크리스트 원안의 "bbox 겹치지 않음"은 S자 컷에서 성립하지 않아 이것으로 대체), 원본 해시 불변,
+  재빌드 누수 0; 점 2개 스트로크 = 같은 평면 컷(파트별 부피 1 %); Suzanne(눈 교차) 주둥이 컷 → 2파트 매니폴드·"2 separate shell(s)" 정보·
+  부피 합 = 원본 − 겹침(4 % 이내), 눈을 지나는 컷은 눈도 자름; 평면+스트로크 4파트; 비활성 스트로크로 재빌드; 저장된 자기교차 스트로크는
+  Build 오류 메시지·변경 없음; 오브젝트를 비껴가는 스트로크는 추가 거부; 복제가 점·방향 복사; Easy 스트로크(갭+커넥터) 한 번에. PASS 4.5/5.2.
+- [x] **P2-4 스트로크 모달 오퍼레이터** `splitforge.stack_add_stroke`(새 코드, freehand의 입력/드로잉 방식만 참고): LMB 그리기, Shift 릴리스 = 축 직선,
+  Enter/Space 확정, LMB 다시 그리기, Esc/RMB 취소, 그리기 사이 뷰 이동 통과, gpu 프리뷰(스트로크 + 리본, 평범한 데이터만), `replace_uid`로 다시 그리기,
+  `easy`로 Easy. 점은 `Cut.points`(로컬)·`Cut.direction`에 저장. (원안의 "숨김 컬렉션 커터 오브젝트"는 만들지 않는다 — 커터는 Build 때 레코드에서 생성.)
+  검증: `test_stroke_modal.py`(헤드리스 스탠드인: 이벤트 사이 bpy 구조체 보관 없음, ed.undo 후 확정, Esc/RMB 흔적 없음·핸들러 제거, Shift 스냅,
+  잘못된 스트로크 Enter 거부+이유, 다시 그리기 uid·커넥터 유지, 오브젝트 사라짐/`cancel()` 정리) PASS; GUI `p2_stroke` — 아래 MANUAL_QA QA-7.
+- [x] **P2-5 곡선 시임 위 커넥터**: (u, v) = 리본 펼침 좌표(u 호 길이, 스트로크 중앙 0; v 압출 방향 깊이), 핀 축 = 리본 국소 법선(t × d).
+  Distribute는 펼친 리본을 래스터 샘플링(소스 안, 다른 컷 갭 밖, 다른 컷 쪽별로 영역)해 루프를 만들고 기존 분배·3D 검사를 쓴다.
+  fit 일반화: 다른 컷 = 장벽(`PlaneBarrier` 무한 평면 / `RibbonBarrier` 실제 연장 리본: 양쪽 솔리드 BVH로 쪽, 리본 BVH로 거리);
+  곡선 시임은 자기 리본 재교차(`own_margin`)도 검사, Build는 경고와 함께 건너뜀.
+  검증: `test_stroke_connectors.py` — S자 + Distribute → 중심이 리본 위(2D 1e-5), 핀 축 vs 실제 리본 면 법선 최대 0.54°(< 2°), v는 d 방향 이동,
+  핀 쪽 부피 +·소켓 쪽 −, 관입 없음; V자 꼭짓점 수동 커넥터 "bends into" 건너뜀, Distribute는 꼭짓점 회피; Z 평면 + 세로 S자: 각 컷 시임이
+  두 영역, 모든 커넥터 다른 컷까지 여유 ≥ 0.4 mm(장벽 종류 확인), 4파트 관입 없음, 리본을 걸친 수동 커넥터 "across another cut". PASS 4.5/5.2.
+- [x] **P2-6 진행률**: `core/progress.py`(`wm.progress_*` + 작업공간 상태바 텍스트 + 리스너). Build는 단계 생성기: 조각×컷마다 2단계(A쪽/B쪽) +
+  커넥터 불리언당 1단계; UI의 Build는 모달 타이머로 한 단계씩 실행(Esc 취소 = 이전 결과 유지), 스크립트(`execute`)는 즉시 실행.
+  검증: `test_progress.py` — 큐브 Z+X 컷 + 커넥터: 단계 수 = 2·1 + 2·2 + 커넥터 불리언 수, 마지막 단계 = 합계; 스트로크 추가 시 +2×조각;
+  모달 Build(스탠드인 TIMER): 끝까지 = execute와 같은 파트, Esc 중간 = 이전 파트·메시 그대로, `cancel()` 동일, 첫 빌드 취소 시 빈 컬렉션 없음. PASS.
+  GUI `p2_build_progress`(13만 면 Suzanne, 스트로크 + 평면 + 커넥터): 빌드 중 창 스크린샷 하단 상태바 "SplitForge Build: Stroke 1: side A (1/4)",
+  Esc 중간 취소 시 이전 파트 유지 — MANUAL_QA QA-8.
+- [x] **P2-7 대형 메시 성능**: `--slow` `test_perf_large`에 51만 면 S자 컷(gap 0.3, 커넥터 2) 추가, 상한 120 s(5.2).
+  결과는 아래 "Phase 2 결과" 참고.
+- [x] **P2-8 (P1 검증 후속)** D8 중공 벽: Distribute가 맞지 않는 목표점을 옆으로(LINE은 선 방향, GRID는 행/열) 이웃 간격의 절반 안에서 찾아
+  재료 쪽(벽 가운데)에 둔다; 2D에서 탈락한 위치도 dropped에 셈; Distribute 경고에 실제 이유(표면 관통 / 다른 컷 / 곡선 시임 / 시임 가장자리
+  공간 없음 / 다른 커넥터와 너무 가까움). Build의 1 mm 샘플 간격을 지우면 실패하는 테스트.
+  검증: `test_connectors_hollow.py`(벽 8 mm: LINE 2개 모두 벽 가운데 u ≈ ±16, GRID 16개, 빌드 매니폴드·부피 변화; 벽 3 mm에 8개 요청 →
+  dropped 8 "no room"; 가파른 D7 재현에서 "would reach across another cut" 경고), `test_fit_spacing.py`(1.25 mm 링 사이 0.3 mm 공동). PASS.
+
+### Phase 2 결과 (feat/p2-curved)
+
+- 헤드리스 34/34 PASS ×2(4.5.5 / 5.2.2), `--gui` 12개 시나리오 ×2 PASS(새 `p2_stroke` 43–48 s, `p2_build_progress` 52–57 s).
+  스크린샷: 리본 오버레이 [4.5](qa/p2_stroke_4.5.png) [5.2](qa/p2_stroke_5.2.png), 분리한 파트 [4.5](qa/p2_stroke_built_4.5.png)
+  [5.2](qa/p2_stroke_built_5.2.png), 빌드 중 상태바 [4.5](qa/p2_build_progress_4.5.png) [5.2](qa/p2_build_progress_5.2.png).
+- `--slow test_perf_large`(5.2, 514 560면): 레거시 split 4.89 s, connectors 12.92 s, 평면 Build 59.53 s, **S자 스트로크 추가 0.19 s,
+  Distribute 0.81 s, Build 85.35 s(상한 120 s)** — 양쪽 DIFFERENCE 각 EXACT_SELF ~28.5 s, 커넥터 UNION 13.4 s / DIFFERENCE 11.5 s.
+  평면 Build는 Phase 1의 ~9–10 s에서 59.5 s로 늘었다: 커넥터 불리언이 자기교차 Suzanne에서 이제 정확한 EXACT_SELF로 성공
+  (이전에는 EXACT가 부피를 잃고 MANIFOLD로 폴백). PLAN 7-7 열린 결정.
+- 뮤테이션 15건 중 14건 검출(불리언 검증 끔, 굽힘(fold) 검사 끔, 쌍 부피 검사 끔, Build 자기 시임 검사 끔, Distribute가 리본 장벽 무시,
+  D8 옆 탐색 끔, 2D 탈락 미집계, Build `max_step` 제거, `is_inside` 모서리 수정 되돌림, 모달이 region 보관, 취소 시 새 파트 남김,
+  커넥터 진행 단계 누락, 리본 깊이 분할 끔, 셸 정보 누락). 미검출 1건: "+오프셋이 −오프셋의 왼쪽" 포함 검사 — 만들어 본 모든 사례가
+  오프셋 교차 검사에 먼저 걸리는 중복 방어선(남겨 둠).
 
 ## Phase 3 — 커넥터 고도화 + 레거시 제거
 

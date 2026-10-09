@@ -69,8 +69,13 @@ def draw_easy(context, layout):
     col = layout.column(align=True)
     col.row(align=True).prop(s, "easy_axis", expand=True)
     col.prop(s, "easy_offset_mm")
+    col.prop(s, "easy_gap_mm")
     col.prop(s, "easy_connector_count")
-    layout.operator(OP("easy_cut"), text="Cut", icon='MOD_BOOLEAN')
+    row = layout.row(align=True)
+    row.operator(OP("easy_cut"), text="Cut", icon='MOD_BOOLEAN')
+    draw = row.row(align=True)
+    draw.operator_context = 'INVOKE_REGION_WIN'
+    draw.operator(OP("stack_add_stroke"), text="Draw Cut", icon='CURVE_BEZCURVE').easy = True
 
 
 def draw_draft(context, layout, stack):
@@ -79,6 +84,9 @@ def draw_draft(context, layout, stack):
     col = row.column(align=True)
     for axis in ('X', 'Y', 'Z'):
         col.operator(OP("stack_add_plane"), text=axis).axis = axis
+    stroke_col = col.column(align=True)
+    stroke_col.operator_context = 'INVOKE_REGION_WIN'
+    stroke_col.operator(OP("stack_add_stroke"), text="", icon='CURVE_BEZCURVE')
     col.separator()
     col.operator(OP("stack_remove"), text="", icon='REMOVE')
     col.operator(OP("stack_duplicate"), text="", icon='DUPLICATE')
@@ -89,7 +97,7 @@ def draw_draft(context, layout, stack):
     col.operator(OP("stack_clear"), text="", icon='TRASH')
 
     if not stack.cuts:
-        layout.label(text="Add a cut (X/Y/Z), then Build", icon='INFO')
+        layout.label(text="Add a cut (X/Y/Z or stroke), then Build", icon='INFO')
         return
     cut = stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
     box = layout.box()
@@ -97,6 +105,14 @@ def draw_draft(context, layout, stack):
     box.label(text=f"Gap {cut.gap_mm:g} mm, {len(cut.connectors)} connector(s)")
     row = box.row(align=True)
     row.prop(cut, "enabled")
+    if cut.kind == 'STROKE':
+        box.prop(cut, "gap_mm")
+        box.label(text=f"Stroke: {len(cut.points)} points", icon='CURVE_BEZCURVE')
+        op_row = box.row()
+        op_row.operator_context = 'INVOKE_REGION_WIN'
+        op_row.operator(OP("stack_add_stroke"), text="Redraw in Viewport",
+                        icon='GREASEPENCIL').replace_uid = cut.uid
+        return
     row.prop(cut, "cap")
     box.prop(cut, "gap_mm")
     col = box.column(align=True)

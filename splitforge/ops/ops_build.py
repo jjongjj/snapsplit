@@ -2,27 +2,43 @@
 # This file is part of SplitForge (fork of SnapSplit by Christoph Medicus).
 
 # ops/ops_build.py
-"""Build, clear build, Easy cut and mesh validation operators."""
+"""Build, clear build, Easy cut and mesh validation operators.
+
+Build from the UI runs modal: a timer advances ``cuts.build.build_steps`` one
+step (one boolean or plane side) per event, so the cursor progress and the
+status bar text update while it works; Esc cancels and leaves the previous
+result untouched. Every other event is swallowed (no undo while building),
+view navigation passes through. ``execute`` (scripts, headless) builds at once.
+Between events the operator keeps the step generator (plain data, the source
+object as an ID) and the window manager's timer, nothing else.
+"""
+
+import traceback
 
 import bpy
 from bpy.props import EnumProperty, FloatProperty, IntProperty
 from bpy.types import Operator
 
 from ..connectors import auto
-from ..core import naming, units, validate
+from ..core import log, naming, units, validate
 from ..cuts import build
 from ..model import stack as stack_api
 from .ops_stack import AXIS_ITEMS
+
+NAVIGATION = {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'TRACKPADPAN', 'TRACKPADZOOM',
+              'MOUSEROTATE', 'MOUSESMARTZOOM', 'NDOF_MOTION'}
 
 
 def _report_result(op, result):
     for w in result.warnings:
         op.report({'WARNING'}, w)
+    for i in result.infos:
+        op.report({'INFO'}, i)
     op.report({'INFO'}, f"Built {len(result.parts)} part(s) in {result.collection}")
 
 
 class SPLITFORGE_OT_build(Operator):
-    """Build the enabled cuts into a result collection (the original object is not modified). With a built part selected, the source object's stack is built"""
+    """Build the enabled cuts into a result collection (the original object is not modified). With a built part selected, the source object's stack is built. Esc cancels a running build"""
     bl_idname = naming.op("build")
     bl_label = "Build"
     bl_options = {'REGISTER', 'UNDO'}
@@ -41,6 +57,57 @@ class SPLITFORGE_OT_build(Operator):
             return {'CANCELLED'}
         _report_result(self, result)
         return {'FINISHED'}
+
+    def invoke(self, context, event):
+        if bpy.app.background or context.window is None:
+            return self.execute(context)
+        self._gen = build.build_steps(stack_api.context_owner(context))
+        self._timer = context.window_manager.event_timer_add(0.01, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def _finish(self, context):
+        timer, self._timer = getattr(self, "_timer", None), None
+        if timer is not None:
+            context.window_manager.event_timer_remove(timer)
+        gen, self._gen = getattr(self, "_gen", None), None
+        if gen is not None:
+            gen.close()
+
+    def modal(self, context, event):
+        if event.type == 'ESC' and event.value == 'PRESS':
+            self._finish(context)
+            self.report({'WARNING'}, "Build cancelled; the previous result is unchanged")
+            log.info("Build cancelled.")
+            return {'CANCELLED'}
+        if event.type in NAVIGATION:
+            return {'PASS_THROUGH'}
+        if event.type != 'TIMER' or self._gen is None:
+            return {'RUNNING_MODAL'}
+        try:
+            next(self._gen)
+        except StopIteration as stop:
+            self._gen = None
+            self._finish(context)
+            _report_result(self, stop.value)
+            return {'FINISHED'}
+        except build.BuildError as ex:
+            self._gen = None
+            self._finish(context)
+            self.report({'ERROR'}, str(ex))
+            return {'CANCELLED'}
+        except Exception as ex:
+            self._gen = None
+            self._finish(context)
+            log.error("build failed: %s", traceback.format_exc())
+            self.report({'ERROR'}, f"Build failed: {ex}")
+            return {'CANCELLED'}
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        """File load / window close: stop and drop what this build created."""
+        self._finish(context)
+        log.info("Build cancelled.")
 
 
 class SPLITFORGE_OT_clear_build(Operator):
@@ -92,24 +159,34 @@ class SPLITFORGE_OT_easy_cut(Operator):
         count = s.easy_connector_count if self.connector_count < 0 else self.connector_count
         next_uid = stack_api.get_stack(obj).next_uid
         index = stack_api.add_axis_cut(obj, self.axis, units.mm_to_scene(self.offset_mm, context.scene))
-        cut = stack_api.get_stack(obj).cuts[index]
+        return easy_finish(self, context, obj, index, count, next_uid)
+
+
+def easy_finish(op, context, obj, index, count, next_uid):
+    """Easy mode after adding cut ``index``: Easy gap, connectors along the seam, build.
+
+    On failure the cut is removed again (CANCELLED pushes no undo step, so no
+    trace is left). Returns the operator result set.
+    """
+    s = getattr(context.scene, naming.SCENE_SETTINGS)
+    cut = stack_api.get_stack(obj).cuts[index]
+    cut.gap_mm = s.easy_gap_mm
+    try:
         if count > 0:
             cut.distribution = 'LINE'
             cut.connector_count = count
             res = auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
                                 s.new_connector_height_mm, s.new_connector_length_mm)
             if res.dropped:
-                self.report({'WARNING'}, f"{res.dropped} connector position(s) did not fit and were dropped")
-        try:
-            result = build.build(context, obj)
-        except build.BuildError as ex:
-            # CANCELLED pushes no undo step: leave no trace
-            stack_api.remove_cut(obj, index)
-            stack_api.get_stack(obj).next_uid = next_uid
-            self.report({'ERROR'}, str(ex))
-            return {'CANCELLED'}
-        _report_result(self, result)
-        return {'FINISHED'}
+                op.report({'WARNING'}, f"{res.dropped} connector position(s) dropped: {res.describe()}")
+        result = build.build(context, obj)
+    except build.BuildError as ex:
+        stack_api.remove_cut(obj, index)
+        stack_api.get_stack(obj).next_uid = next_uid
+        op.report({'ERROR'}, str(ex))
+        return {'CANCELLED'}
+    _report_result(op, result)
+    return {'FINISHED'}
 
 
 class SPLITFORGE_OT_validate(Operator):

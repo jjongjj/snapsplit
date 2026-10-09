@@ -142,8 +142,84 @@ def stand_in(op_cls):
     Returns ``(op, reports)``.
     """
     reports = []
-    ns = {k: v for k, v in vars(op_cls).items()
-          if callable(v) or isinstance(v, property)}
+    ns = {}
+    for klass in reversed(op_cls.__mro__):   # add-on mixins too (e.g. a shared _CutOp)
+        if klass is object or klass.__module__.startswith(("bpy", "_bpy")):
+            continue
+        ns.update({k: v for k, v in vars(klass).items()
+                   if not k.startswith("__") and (callable(v) or isinstance(v, property))})
     ns["report"] = lambda self, level, msg: reports.append((set(level), msg))
     op = type("StandIn_" + op_cls.__name__, (), ns)()
     return op, reports
+
+
+# ---------------------------------------------------------------------------
+# Synthetic orthographic 3D view (for view3d_utils without a window)
+# ---------------------------------------------------------------------------
+
+class FakeRegion:
+    def __init__(self, width=800, height=600, x=0, y=0, pointer=0x5F17):
+        self.width, self.height, self.x, self.y = width, height, x, y
+        self._pointer = pointer
+        self.type = 'WINDOW'
+
+    def as_pointer(self):
+        return self._pointer
+
+
+class FakeView:
+    """RegionView3D stand-in for an orthographic view.
+
+    ``rotation``: view rotation (camera looks along its -Z), ``center``: point in
+    the middle of the region, ``scale``: world units per pixel.
+    """
+
+    def __init__(self, rotation, center=(0.0, 0.0, 0.0), scale=0.1, region=None, distance=100.0):
+        from mathutils import Matrix, Vector
+        self.region = region or FakeRegion()
+        self.view_rotation = rotation.copy()
+        self.is_perspective = False
+        self.view_perspective = 'ORTHO'
+        cam = (Matrix.Translation(Vector(center)) @ rotation.to_matrix().to_4x4()
+               @ Matrix.Translation((0.0, 0.0, distance)))
+        self.view_matrix = cam.inverted()
+        w = self.region.width * scale
+        h = self.region.height * scale
+        near, far = 0.01, 2.0 * distance
+        win = Matrix.Identity(4)
+        win[0][0] = 2.0 / w
+        win[1][1] = 2.0 / h
+        win[2][2] = -2.0 / (far - near)
+        win[2][3] = -(far + near) / (far - near)
+        self.window_matrix = win
+        self.perspective_matrix = win @ self.view_matrix
+
+    def to_region(self, co):
+        """Region coordinates of a world point."""
+        from bpy_extras import view3d_utils
+        from mathutils import Vector
+        return view3d_utils.location_3d_to_region_2d(self.region, self, Vector(co))
+
+
+def front_view(scale=0.1, center=(0.0, 0.0, 0.0)):
+    """Front orthographic view (looking along +Y, Z up), like Numpad 1."""
+    import math
+    from mathutils import Euler
+    return FakeView(Euler((math.radians(90.0), 0.0, 0.0)).to_quaternion(), center, scale)
+
+
+def mesh_hash(obj):
+    import hashlib
+    h = hashlib.sha256()
+    for v in obj.data.vertices:
+        h.update(repr(tuple(round(c, 6) for c in v.co)).encode())
+    return h.hexdigest()
+
+
+def bm_of(obj, world=True):
+    """bmesh copy of an object's mesh (world space by default); caller frees it."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    if world:
+        bm.transform(obj.matrix_world)
+    return bm

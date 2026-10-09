@@ -145,7 +145,7 @@ def run_blender(exe, args, timeout):
             "tmp": to_exe_path(TMP_DIR, exe)}
 
 
-GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel",
+GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel", "p2_stroke", "p2_build_progress",
                  "qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
                  "adjust_undo_wheel", "conn_undo", "load_adjust", "load_conn")
 GUI_SHOTS_DIR = os.path.join(OUT_DIR, "gui")

@@ -111,7 +111,48 @@ def _spread(lo, hi, count, margin_pct, inset=0.0):
     return [lo + (hi - lo) * i / (count - 1) for i in range(count)]
 
 
-def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15.0, inset=0.0):
+# Sideways search: probes per window (each side of the target)
+SEARCH_STEPS = 48
+
+
+def _line_point(loops, axis, s, inset, mid):
+    """Point on the cross line at ``s`` (center of the widest material interval), or None."""
+    intervals = [(b + inset, e - inset) for b, e in line_intervals(loops, axis, s) if e - b > 2 * inset]
+    if not intervals:
+        return None
+    widest = max(e - b for b, e in intervals)
+    # Widest interval; among (nearly) equally wide ones the one closest to the middle
+    b, e = min((iv for iv in intervals if iv[1] - iv[0] >= 0.9 * widest),
+               key=lambda iv: abs((iv[0] + iv[1]) * 0.5 - mid))
+    c = (b + e) * 0.5
+    point = (s, c) if axis == 0 else (c, s)
+    return point if fits_2d(point, loops, inset) else None
+
+
+def _sideways(probe, s, lo, hi):
+    """Search ``probe(s')`` sideways from ``s`` within [lo, hi] (nearest first).
+
+    The first fitting s' starts a run of fitting positions in that direction;
+    the middle of the run is returned (the middle of a wall, not its edge).
+    Returns the probe's point or None.
+    """
+    found = probe(s)
+    if found is not None or hi <= lo:
+        return found
+    step = max(hi - lo, 1e-12) / (2 * SEARCH_STEPS)
+    for k in range(1, 2 * SEARCH_STEPS + 1):
+        for sign in (-1.0, 1.0):
+            first = s + sign * k * step
+            if not lo <= first <= hi or probe(first) is None:
+                continue
+            last = first
+            while lo <= last + sign * step <= hi and probe(last + sign * step) is not None:
+                last += sign * step
+            return probe((first + last) * 0.5) or probe(first)
+    return None
+
+
+def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15.0, inset=0.0, rejected=None):
     """Connector positions (u, v) inside a seam outline.
 
     ``loops``: closed 2D loops of the seam section (outer loops and holes,
@@ -121,34 +162,95 @@ def distribute_points(loops, distribution='LINE', count=2, rows=2, margin_pct=15
     points over the bounds and keeps those inside the material. ``margin_pct``
     is kept free at both ends, as percent of the extent. ``inset`` is the
     smallest allowed distance from a seam edge (connector radius + clearance +
-    wall); points closer to an edge are dropped.
+    wall). A position that does not fit is searched sideways (along the line
+    for LINE, along the row then the column for GRID) within half the spacing
+    to its neighbours, towards material: a hollow part's wall next to the
+    target (defect D8). Targets with no position are appended to ``rejected``
+    (when given) so callers can count them as dropped.
     """
     loops = [loop for loop in loops if len(loop) >= 3]
     if not loops or count < 1:
         return []
     u0, u1, v0, v1 = _bounds(loops)
+    points = []
     if distribution == 'GRID':
-        points = []
-        for v in _spread(v0, v1, max(1, rows), margin_pct, inset):
-            for u in _spread(u0, u1, count, margin_pct, inset):
-                if fits_2d((u, v), loops, inset):
-                    points.append((u, v))
+        us = _spread(u0, u1, count, margin_pct, inset)
+        vs = _spread(v0, v1, max(1, rows), margin_pct, inset)
+        du = (us[1] - us[0]) * 0.5 if len(us) > 1 else (u1 - u0) * 0.5
+        dv = (vs[1] - vs[0]) * 0.5 if len(vs) > 1 else (v1 - v0) * 0.5
+        for v in vs:
+            for u in us:
+                found = _sideways(lambda x, v=v: (x, v) if fits_2d((x, v), loops, inset) else None,
+                                  u, max(u0, u - du), min(u1, u + du))
+                if found is None:
+                    found = _sideways(lambda y, u=u: (u, y) if fits_2d((u, y), loops, inset) else None,
+                                      v, max(v0, v - dv), min(v1, v + dv))
+                if found is not None:
+                    points.append(found)
+                elif rejected is not None:
+                    rejected.append((u, v))
         return points
 
     axis = 0 if (u1 - u0) >= (v1 - v0) else 1
     lo, hi = (u0, u1) if axis == 0 else (v0, v1)
     mid = (v0 + v1) * 0.5 if axis == 0 else (u0 + u1) * 0.5
-    points = []
-    for s in _spread(lo, hi, count, margin_pct, inset):
-        intervals = [(b + inset, e - inset) for b, e in line_intervals(loops, axis, s) if e - b > 2 * inset]
-        if not intervals:
-            continue
-        widest = max(e - b for b, e in intervals)
-        # Widest interval; among (nearly) equally wide ones the one closest to the middle
-        b, e = min((iv for iv in intervals if iv[1] - iv[0] >= 0.9 * widest),
-                   key=lambda iv: abs((iv[0] + iv[1]) * 0.5 - mid))
-        c = (b + e) * 0.5
-        point = (s, c) if axis == 0 else (c, s)
-        if fits_2d(point, loops, inset):
-            points.append(point)
+    targets = _spread(lo, hi, count, margin_pct, inset)
+    half = (targets[1] - targets[0]) * 0.5 if len(targets) > 1 else (hi - lo) * 0.5
+    for s in targets:
+        found = _sideways(lambda x: _line_point(loops, axis, x, inset, mid), s, max(lo, s - half), min(hi, s + half))
+        if found is not None:
+            points.append(found)
+        elif rejected is not None:
+            rejected.append((s, mid) if axis == 0 else (mid, s))
     return points
+
+
+def mask_loops(inside, nu, nv, u0, v0, step):
+    """Boundary loops of the inside cells of a raster (even-odd loops in (u, v)).
+
+    ``inside(i, j)`` tells whether cell (i, j) (center ``u0 + (i + 0.5) * step``,
+    ``v0 + (j + 0.5) * step``) is material. Loops run along cell edges with the
+    material on their left; at a vertex where two cells touch diagonally the
+    loop turns left, so such cells stay separate loops. Collinear points are
+    dropped.
+    """
+    cells = {(i, j) for i in range(nu) for j in range(nv) if inside(i, j)}
+    edges = {}
+    for i, j in cells:
+        if (i, j - 1) not in cells:
+            edges.setdefault((i, j), []).append((i + 1, j))
+        if (i + 1, j) not in cells:
+            edges.setdefault((i + 1, j), []).append((i + 1, j + 1))
+        if (i, j + 1) not in cells:
+            edges.setdefault((i + 1, j + 1), []).append((i, j + 1))
+        if (i - 1, j) not in cells:
+            edges.setdefault((i, j + 1), []).append((i, j))
+    loops = []
+    while edges:
+        start = next(iter(edges))
+        loop, cur, prev_dir = [start], start, None
+        while True:
+            outs = edges.get(cur)
+            if not outs:
+                break
+            if len(outs) > 1 and prev_dir is not None:
+                nxt = max(outs, key=lambda q: prev_dir[0] * (q[1] - cur[1]) - prev_dir[1] * (q[0] - cur[0]))
+            else:
+                nxt = outs[0]
+            outs.remove(nxt)
+            if not outs:
+                del edges[cur]
+            prev_dir = (nxt[0] - cur[0], nxt[1] - cur[1])
+            cur = nxt
+            if cur == start:
+                break
+            loop.append(cur)
+        simple = []
+        n = len(loop)
+        for k in range(n):
+            a, b, c = loop[k - 1], loop[k], loop[(k + 1) % n]
+            if (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) != 0:
+                simple.append(b)
+        if len(simple) >= 3:
+            loops.append([(u0 + i * step, v0 + j * step) for i, j in simple])
+    return loops

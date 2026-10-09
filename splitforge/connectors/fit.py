@@ -9,14 +9,19 @@ reaches length/2 + clearance into the other side. Two things can go wrong:
 
 - On an oblique cut the walls are slanted against that axis, so the pin or
   socket can break through the OUTER surface (defect D1).
-- The pin or socket can cross ANOTHER cut plane and end up in a third part
-  that has no matching socket (defect D7): the parts collide on assembly.
+- The pin or socket can cross ANOTHER cut and end up in a third part that has
+  no matching socket (defect D7): the parts collide on assembly.
+- On a curved (stroke) seam the straight pin can cross its OWN seam again
+  where the ribbon bends towards it.
 
 ``check`` samples the outer surface of the pin and socket solids (the spans
 and sizes Build uses) on a grid with at most ``max_step`` spacing and tests:
 
-1. every OTHER enabled cut plane: all samples stay on the connector's side,
-   beyond that cut's half gap plus the wall margin;
+1. every OTHER enabled cut (a "barrier": PlaneBarrier for planes, the
+   infinite plane; RibbonBarrier for strokes, the actual extended ribbon via
+   its positive-side solid): all samples stay on the connector's side, beyond
+   that cut's half gap plus the wall margin; for a stroke seam also its own
+   ribbon (``own``): samples beyond the crossing zone stay on their side;
 2. the uncut source: every sample is inside (nearest-face normal, confirmed by
    ray parity when in doubt) and at least ``wall`` deep;
 3. no segment between neighbouring samples crosses the source surface, so
@@ -34,6 +39,8 @@ from . import shapes
 
 MIN_RING = 24
 MIN_RINGS = 9
+# Curved seams: samples within half gap + max(wall, OWN_SKIP * length) of the seam straddle it by design
+OWN_SKIP = 0.05
 # Skewed directions for the parity test (never parallel to axis-aligned faces/edges)
 _RAY_DIRS = (Vector((0.5773, 0.5774, 0.5775)).normalized(),
              Vector((-0.7071, 0.1234, 0.6963)).normalized(),
@@ -45,9 +52,63 @@ class FitResult:
     plane_margin: float = math.inf      # smallest clearance to another cut (beyond its half gap)
     surface_depth: float = math.inf     # smallest depth inside the source
     pierced: bool = False               # a sample segment crosses the source surface
+    own_margin: float = math.inf        # curved seam: clearance from its own ribbon (beyond half gap)
 
     def ok(self, wall):
-        return self.plane_margin >= wall and self.surface_depth >= wall and not self.pierced
+        return (self.plane_margin >= wall and self.own_margin >= 0.0 and self.surface_depth >= wall
+                and not self.pierced)
+
+    def reason(self, wall):
+        """Short reason the connector does not fit ("" if it does)."""
+        if self.plane_margin < wall:
+            return "other cut"
+        if self.own_margin < 0.0:
+            return "own seam"
+        if self.surface_depth < wall or self.pierced:
+            return "surface"
+        return ""
+
+
+class PlaneBarrier:
+    """Another planar cut: the infinite plane (co, n) with its gap (world space)."""
+
+    def __init__(self, co, n, gap):
+        self.co, self.n, self.gap = Vector(co), Vector(n).normalized(), gap
+
+    def margin(self, samples, center):
+        side = 1.0 if (center - self.co).dot(self.n) >= 0.0 else -1.0
+        return min(side * (p - self.co).dot(self.n) for p in samples) - 0.5 * self.gap
+
+
+class RibbonBarrier:
+    """A stroke cut: BVHs of its closed positive-side solid and of its open ribbon.
+
+    The side of a point is "inside the positive-side solid"; its distance is the
+    distance to the ribbon (the solid's other faces lie outside the object).
+    """
+
+    def __init__(self, side_bvh, ribbon_bvh, gap):
+        self.side_bvh, self.ribbon_bvh, self.gap = side_bvh, ribbon_bvh, gap
+
+    def positive(self, p):
+        return is_inside(self.side_bvh, p)
+
+    def distance(self, p):
+        hit = self.ribbon_bvh.find_nearest(p)
+        return math.inf if hit[0] is None else hit[3]
+
+    def margin(self, samples, center):
+        side = self.positive(center)
+        worst = math.inf
+        for p in samples:
+            d = self.distance(p)
+            worst = min(worst, d if self.positive(p) == side else -d)
+        return worst - 0.5 * self.gap
+
+
+def _barrier(item):
+    """Barrier object for an item of ``planes`` (a barrier, or a legacy (co, n, gap) tuple)."""
+    return PlaneBarrier(*item) if isinstance(item, tuple) else item
 
 
 def _outline(kind, width, height, max_step=None):
@@ -116,14 +177,18 @@ def is_inside(bvh, point):
 
     The nearest-face normal and the parity of one skewed ray usually agree.
     When they do not (a point in a face's extended plane beyond its edge, a ray
-    grazing an edge) two more skewed rays decide by majority.
+    grazing an edge or passing through a vertex), or when the normal cannot
+    tell (the nearest point is on an edge or corner, so the offset is
+    perpendicular to the returned face normal), two more skewed rays decide by
+    majority.
     """
-    co, normal, _index, _dist = bvh.find_nearest(point)
+    co, normal, _index, dist = bvh.find_nearest(point)
     if co is None:
         return False
-    by_normal = (point - co).dot(normal) < 0.0
+    dot = (point - co).dot(normal)
+    by_normal = dot < 0.0
     first = _crossings(bvh, point, _RAY_DIRS[0]) % 2 == 1
-    if first == by_normal:
+    if first == by_normal and abs(dot) > 1e-3 * dist:
         return by_normal
     votes = [first] + [_crossings(bvh, point, d) % 2 == 1 for d in _RAY_DIRS[1:]]
     return sum(votes) >= 2
@@ -162,34 +227,59 @@ def _pierced(bvh, grid):
 
 
 def plane_margin(spec, planes, pin_positive=None, max_step=None):
-    """Smallest distance of the connector beyond the half gap of each OTHER cut plane.
+    """Smallest distance of the connector beyond the half gap of each OTHER cut.
 
-    ``planes``: [(co, n, gap)] in world space. The connector's side of a plane is
-    the side of its seam point; a negative result means the pin or socket
-    reaches across that cut (into a third part) or into its gap.
+    ``planes``: barriers (PlaneBarrier/RibbonBarrier, or (co, n, gap) tuples) in
+    world space. The connector's side of a cut is the side of its seam point; a
+    negative result means the pin or socket reaches across that cut (into a
+    third part) or into its gap.
     """
     if not planes:
         return math.inf
     center = spec.matrix.translation
     samples = spec_samples(spec, pin_positive, max_step)
+    return min(_barrier(item).margin(samples, center) for item in planes)
+
+
+def own_margin(spec, own, pin_positive=None, max_step=None, skip=None):
+    """Clearance of a connector on a curved seam from its own ribbon.
+
+    Samples with local |z| below half gap + ``skip`` (default OWN_SKIP x
+    length) straddle the seam by design and are ignored; every other sample
+    must lie on the side its local z points to (+z = positive side), beyond the
+    half gap. Negative: the ribbon bends into the pin or socket.
+    """
+    if own is None:
+        return math.inf
+    skip = OWN_SKIP * spec.length if skip is None else skip
+    inv = spec.matrix.inverted_safe()
+    half = 0.5 * own.gap
     worst = math.inf
-    for co, n, gap in planes:
-        side = 1.0 if (center - co).dot(n) >= 0.0 else -1.0
-        worst = min(worst, min(side * (p - co).dot(n) for p in samples) - 0.5 * gap)
+    for p in spec_samples(spec, pin_positive, max_step):
+        z = (inv @ p).z
+        if abs(z) < half + skip:
+            continue
+        d = own.distance(p)
+        worst = min(worst, (d if own.positive(p) == (z > 0.0) else -d) - half)
     return worst
 
 
-def check(spec, bvh, planes=(), wall=0.0, both_sides=False, max_step=None):
-    """FitResult of a connector against the other cut planes and the source surface.
+def check(spec, bvh, planes=(), wall=0.0, both_sides=False, max_step=None, own=None):
+    """FitResult of a connector against the other cuts, its own curved seam and the source surface.
 
     Stops at the first failed test. ``both_sides`` also checks the mirrored pin
-    side, so flipping pin_side later stays valid.
+    side, so flipping pin_side later stays valid. ``own``: RibbonBarrier of the
+    connector's own stroke cut (None for planar cuts).
     """
     res = FitResult()
     sides = (True, False) if both_sides else (spec.pin_positive,)
     for side in sides:
         res.plane_margin = min(res.plane_margin, plane_margin(spec, planes, side, max_step))
         if res.plane_margin < wall:
+            return res
+        res.own_margin = min(res.own_margin, own_margin(spec, own, side, max_step,
+                                                        max(wall, OWN_SKIP * spec.length)))
+        if res.own_margin < 0.0:
             return res
     for side in sides:
         grids = _grids(spec, side, max_step)
