@@ -11,7 +11,9 @@
 /V_0.2.0_freehand/
 /i18n_migration/
 /img/
-/Tests/
+/tests/fixtures/*.blend1
+/tests/_out/
+__pycache__/
 /Examples/
 snapsplit_aktuell.txt
 snapsplit_funktioniert-noch.txt
@@ -26,7 +28,6 @@ snapsplit/blender_manifest00.py
 snapsplit/languages00.py
 snapsplit/ops_align00.py
 snapsplit/ops_connectors00.py
-snapsplit/ops_split.py
 snapsplit/prefs00.py
 snapsplit/seam_data00.py
 snapsplit/README00.py
