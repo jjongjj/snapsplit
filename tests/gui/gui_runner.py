@@ -106,8 +106,13 @@ STDOUT = _Tee(sys.stdout)
 sys.stdout = STDOUT
 
 
-def printed(text):
-    return text in "".join(STDOUT.lines)
+def printed(text, since=0):
+    """True if ``text`` was printed after output position ``since`` (see output_mark)."""
+    return text in "".join(STDOUT.lines)[since:]
+
+
+def output_mark():
+    return len("".join(STDOUT.lines))
 
 
 # --- add-on -----------------------------------------------------------------
@@ -227,11 +232,14 @@ def set_view(axis_type, distance_factor=1.0):
     return named(f"view_{axis_type}", step)
 
 
-def set_shading_solid():
+def set_shading_solid(overlays=False):
+    """Solid shading with material colors. Overlays off keeps pixel checks free of grid/axis
+    colors; scenarios whose previews are drawn by the overlay engine (wireframe objects,
+    gpu draw handlers) keep them on so the screenshots show what they are named for."""
     space = view3d()[1].spaces.active
     space.shading.type = 'SOLID'
     space.shading.color_type = 'MATERIAL'
-    space.overlay.show_overlays = False
+    space.overlay.show_overlays = overlays
 
 
 # --- scene helpers ------------------------------------------------------------
@@ -298,7 +306,7 @@ def setup_scene_mm():
     units.scale_length = 1.0
 
 
-def setup_cube():
+def setup_cube(overlays=False):
     with override():
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o)
@@ -309,7 +317,11 @@ def setup_cube():
         props.split_axis = 'Z'
         props.parts_count = 2
         props.split_offset_mm = 0.0
-    set_shading_solid()
+    set_shading_solid(overlays)
+
+
+def setup_cube_overlays():
+    setup_cube(overlays=True)
 
 
 def split_into_parts():
@@ -337,6 +349,7 @@ def push_settings_change():
 
 def invoke(idname):
     def step():
+        STATE["out_mark"] = output_mark()  # reports of this run only (see check_confirmed)
         event('MOUSEMOVE', 'NOTHING', region_center())
         with override():
             group, name = idname.split(".")
@@ -456,7 +469,8 @@ def check_confirmed(tag_before):
               (o_before, o_now))
         check(f"confirm ended the modal ({tag_before})",
               'SNAPSPLIT_OT_adjust_split_axis' not in modal_ops(), modal_ops())
-        check("reported 'Split axis adjusted.'", printed("Split axis adjusted."))
+        check(f"reported 'Split axis adjusted.' ({tag_before})",
+              printed("Split axis adjusted.", STATE.get("out_mark", 0)))
     return named("check_confirmed", step)
 
 
@@ -673,6 +687,230 @@ def pos(dx=0, dy=0):
     return lambda: (region_center()[0] + dx, region_center()[1] + dy)
 
 
+# --- P1: SplitForge Draft workflow --------------------------------------------------
+
+def sf():
+    return bpy.context.scene.splitforge
+
+
+def sf_cuts():
+    o = bpy.data.objects.get("GUI_Cube")
+    return None if o is None else o.splitforge_stack.cuts
+
+
+def sf_parts():
+    return sorted(o.name for o in bpy.data.objects if o.get("splitforge_source") == "GUI_Cube")
+
+
+def sf_setup(n_cuts=1):
+    def step():
+        setup_cube(overlays=True)
+        with override():
+            cube = bpy.data.objects["GUI_Cube"]
+            bpy.context.view_layer.objects.active = cube
+            cube.select_set(True)
+            sf().show_overlay = True
+            sf().export_directory = os.path.join(bpy.app.tempdir, "p1_export") + os.sep
+            for axis in ('Z', 'X', 'Y')[:n_cuts]:
+                bpy.ops.splitforge.stack_add_plane('EXEC_DEFAULT', True, axis=axis)
+            bpy.ops.ed.undo_push(message="gui: setup")
+    return named("sf_setup", step)
+
+
+def sf_overlay(on):
+    def step():
+        sf().show_overlay = on
+        view3d()[1].tag_redraw()
+    return named(f"sf_overlay_{on}", step)
+
+
+def sf_check_overlay_colour():
+    off = warm_pixels(STATE["shots"]["overlay_off"])
+    on = warm_pixels(STATE["shots"]["overlay_on"])
+    log(f"warm pixel fraction overlay off={off:.4f} on={on:.4f}")
+    check("cut plane overlay is drawn (orange active cut, warm pixels on >> off)",
+          on > 0.01 and on > 3 * off, f"off={off:.4f} on={on:.4f}")
+
+
+def sf_record(tag):
+    def step():
+        cut = sf_cuts()[0]
+        STATE[tag] = (tuple(cut.origin), tuple(cut.normal))
+        log(tag, STATE[tag], modal_ops())
+    return named(f"sf_record_{tag}", step)
+
+
+def sf_check(name, fn):
+    def step():
+        ok, detail = fn()
+        check(name, ok, detail)
+    return named("sf_check", step)
+
+
+def sf_z(tag):
+    return STATE[tag][0][2]
+
+
+def ctrl_key(type_, shift=False):
+    """Ctrl(+Shift)+key as a user types it: modifier press, key, modifier release."""
+    def step():
+        xy = region_center()
+        event('LEFT_CTRL', 'PRESS', xy)
+        if shift:
+            event('LEFT_SHIFT', 'PRESS', xy)
+        event(type_, 'PRESS', xy, ctrl=True, shift=shift)
+        event(type_, 'RELEASE', xy, ctrl=True, shift=shift)
+        if shift:
+            event('LEFT_SHIFT', 'RELEASE', xy)
+        event('LEFT_CTRL', 'RELEASE', xy)
+    return named(f"ctrl_{type_}", step)
+
+
+ADJUST = "SPLITFORGE_OT_cut_adjust_plane"
+
+
+def sf_printed_since_invoke(text):
+    return named("sf_printed", lambda: check(f"reported '{text}'", printed(text, STATE["out_mark"])))
+
+
+# Sidebar buttons are found by hovering: a hovered button is the context button of
+# ui.copy_python_command_button (operator buttons) / ui.copy_data_path_button (properties).
+
+def ui_region():
+    _win, area, _r = view3d()
+    return next(r for r in area.regions if r.type == 'UI')
+
+
+def sf_open_sidebar():
+    view3d()[1].spaces.active.show_region_ui = True
+    STATE["tab_y"] = 0
+
+
+def sf_tab_click():
+    """Click down the tab column until the SplitForge tab is active (positions depend on DPI)."""
+    if ui_region().active_panel_category == "SplitForge":
+        return
+    STATE["tab_y"] += 15
+    r = ui_region()
+    xy = (r.x + r.width - 10, r.y + r.height - STATE["tab_y"])
+    event('MOUSEMOVE', 'NOTHING', xy)
+    event('LEFTMOUSE', 'PRESS', xy)
+    event('LEFTMOUSE', 'RELEASE', xy)
+
+
+def sf_scroll_sidebar():
+    r = ui_region()
+    event('WHEELDOWNMOUSE', 'PRESS', (r.x + r.width // 2, r.y + r.height // 2))
+
+
+def sf_no_overlay_errors():
+    check("overlay draw handler raised nothing", not printed("overlay draw failed"))
+
+
+def sf_check_tab():
+    check("SplitForge sidebar tab active", ui_region().active_panel_category == "SplitForge",
+          ui_region().active_panel_category)
+
+
+def fast(fn, delay=0.03):
+    fn.delay = delay
+    return fn
+
+
+SCAN_COLUMNS = (0.1, 0.45, 0.7, 0.85)  # list checkboxes, wide buttons, side icon columns
+
+
+def sf_scan(step_px=12):
+    """Hover a grid over the sidebar and record which button sits where."""
+    steps = [named("scan_reset", lambda: STATE.__setitem__("buttons", {}))]
+    for fy in range(20, 2400, step_px):
+        for fx in SCAN_COLUMNS:
+            def hover(fx=fx, fy=fy):
+                r = ui_region()
+                if fy >= r.height:
+                    return
+                event('MOUSEMOVE', 'NOTHING', (r.x + int(r.width * fx), r.y + r.height - fy))
+
+            def record(fx=fx, fy=fy):
+                win, area, _r = view3d()
+                r = ui_region()
+                if fy >= r.height:
+                    return
+                wm = bpy.context.window_manager
+                found = None
+                with bpy.context.temp_override(window=win, area=area, region=r, screen=win.screen):
+                    for op, kw in ((bpy.ops.ui.copy_python_command_button, {}),
+                                   (bpy.ops.ui.copy_data_path_button, {"full_path": True})):
+                        if op.poll():
+                            wm.clipboard = ""
+                            op(**kw)
+                            found = wm.clipboard
+                            break
+                if found:
+                    STATE["buttons"].setdefault(found, []).append((r.x + int(r.width * fx), r.y + r.height - fy))
+            steps += [fast(named("scan_hover", hover)), fast(named("scan_record", record))]
+    steps.append(named("scan_log", lambda: log("buttons", sorted(STATE["buttons"]))))
+    return steps
+
+
+def button_xy(command):
+    def xy():
+        hits = STATE["buttons"].get(command)
+        if not hits:
+            raise KeyError(f"button not found: {command}; have {sorted(STATE['buttons'])}")
+        # Topmost occurrence (a property may also appear further down, e.g. in the
+        # active-cut box), middle of the hits on that button
+        top = max(p[1] for p in hits)
+        same = sorted(p for p in hits if top - p[1] <= 15)
+        return same[len(same) // 2]
+    return xy
+
+
+def press_button(command):
+    return [move(button_xy(command)), wait] + click('LEFTMOUSE', button_xy(command)) + [wait]
+
+
+CUT0_ENABLED = 'bpy.data.objects["GUI_Cube"].splitforge_stack.cuts[0].enabled'
+BTN = {
+    "add_x": "bpy.ops.splitforge.stack_add_plane(axis='X')",
+    "remove": "bpy.ops.splitforge.stack_remove()",
+    "distribute": "bpy.ops.splitforge.connector_add_auto()",
+    "build": "bpy.ops.splitforge.build()",
+    "export": "bpy.ops.splitforge.export_parts()",
+    "clear": "bpy.ops.splitforge.clear_build()",
+}
+
+
+def sf_check_buttons(keys):
+    def step():
+        missing = [k for k in keys if (BTN.get(k, k)) not in STATE["buttons"]]
+        check(f"sidebar buttons found: {', '.join(keys)}", not missing, f"missing {missing}")
+    return named("sf_check_buttons", step)
+
+
+def sf_check_build():
+    parts = sf_parts()
+    check("Build button: 4 parts", len(parts) == 4, parts)
+    for n in parts:
+        check(f"{n} manifold", is_manifold(bpy.data.objects[n]))
+    src = bpy.data.objects["GUI_Cube"]
+    check("source hidden, unchanged", src.hide_get() and len(src.data.vertices) == 8)
+
+
+def sf_check_export():
+    d = sf().export_directory
+    files = sorted(os.listdir(d)) if os.path.isdir(d) else []
+    check("Export button wrote one STL per part (4)",
+          len(files) == 4 and files == [n + ".stl" for n in sf_parts()], (d, files))
+
+
+def sf_select_cube():
+    with override():
+        cube = bpy.data.objects["GUI_Cube"]
+        bpy.context.view_layer.objects.active = cube
+        cube.select_set(True)
+
+
 SCENARIOS = {
     "qa1_preview_color": [
         setup_cube, qa1_select_cube, set_oblique_view(1.3), wait, screenshot("preview_off"),
@@ -680,7 +918,7 @@ SCENARIOS = {
         qa1_preview(False), wait, qa1_toggle_many, check_clean("preview off"),
     ],
     "qa2_adjust": (
-        [setup_cube, qa1_select_cube, set_view('FRONT', 1.3), adjust_preview(True), wait]
+        [setup_cube, qa1_select_cube, set_oblique_view(1.3), adjust_preview(True), wait]
         # 1) drag + LMB confirm
         + [invoke("snapsplit.adjust_split_axis"), record_adjust("start")] + drag()
         + [wait, record_adjust("dragged"), check_drag_moved("start", "dragged"), screenshot("dragged"),
@@ -696,10 +934,10 @@ SCENARIOS = {
         + [invoke("snapsplit.adjust_split_axis")] + drag(steps=2)
         + [wait, key('ESC'), wait, check_clean("after Esc"),
            named("esc_report", lambda: check("reported 'Adjust split axis cancelled.'",
-                                             printed("Adjust split axis cancelled.")))]
+                                             printed("Adjust split axis cancelled.", STATE["out_mark"])))]
     ),
     "qa3_connectors": (
-        [setup_cube, split_into_parts, set_view('TOP', 1.4), wait, conn_record("v0"),
+        [setup_cube_overlays, split_into_parts, set_view('TOP', 1.4), wait, conn_record("v0"),
          invoke("snapsplit.place_connectors_click"),
          move(lambda: world_to_window(P2)), wait, conn_check_preview_at(P2),
          move(lambda: world_to_window(P1)), wait, conn_check_preview_at(P1), conn_check_preview_moved,
@@ -724,6 +962,79 @@ SCENARIOS = {
            fh_check_unchanged("Esc")]
         # File load while drawing mode is active -> cancel()
         + [invoke("snapsplit.freehand_cut"), wait, load_homefile, wait, fh_load_check]
+    ),
+    "p1_adjust_plane": (
+        [sf_setup(1), set_oblique_view(1.6), sf_overlay(False), wait, screenshot("overlay_off"),
+         sf_overlay(True), wait, wait, screenshot("overlay_on"), sf_check_overlay_colour, sf_record("start")]
+        # Mouse drag up the screen moves the Z plane up; wheel adds exactly 1 mm; LMB confirms
+        + [invoke("splitforge.cut_adjust_plane")] + drag(steps=4, dy=25)
+        + [wait, sf_record("dragged"),
+           sf_check("drag moved the plane up along its normal",
+                    lambda: (sf_z("dragged") > 0.5 and STATE["dragged"][1] == STATE["start"][1],
+                             (STATE["start"], STATE["dragged"]))),
+           screenshot("dragging"), key('WHEELUPMOUSE'), wait, sf_record("wheel"),
+           sf_check("wheel step 1 mm", lambda: (abs(sf_z("wheel") - sf_z("dragged") - 1.0) < 1e-4,
+                                                (sf_z("dragged"), sf_z("wheel"))))]
+        + click('LEFTMOUSE', pos(0, 100))
+        + [wait, check_running(ADJUST, False), sf_printed_since_invoke("Cut plane adjusted."),
+           sf_record("confirmed"),
+           sf_check("LMB kept the plane", lambda: (STATE["confirmed"] == STATE["wheel"], STATE["confirmed"]))]
+        # Real Ctrl+Z / Ctrl+Shift+Z: one undo step per confirmed adjustment
+        + [ctrl_key('Z'), wait, sf_record("undone"),
+           sf_check("Ctrl+Z restored the plane", lambda: (STATE["undone"] == STATE["start"], STATE["undone"])),
+           ctrl_key('Z', shift=True), wait, sf_record("redone"),
+           sf_check("Ctrl+Shift+Z redid it", lambda: (STATE["redone"] == STATE["confirmed"], STATE["redone"]))]
+        # X re-orients, Esc restores everything
+        + [invoke("splitforge.cut_adjust_plane")] + drag(steps=2, dy=-30)
+        + [key('X'), wait, sf_record("x_axis"),
+           sf_check("X aligned the normal with world X",
+                    lambda: (tuple(round(c, 5) for c in STATE["x_axis"][1]) == (1.0, 0.0, 0.0), STATE["x_axis"])),
+           key('ESC'), wait, check_running(ADJUST, False), sf_record("escaped"),
+           sf_check("Esc restored the plane", lambda: (STATE["escaped"] == STATE["redone"], STATE["escaped"])),
+           sf_printed_since_invoke("Adjust cut plane cancelled.")]
+        # ed.undo/redo while the modal runs (undo-safety regression), then file load -> cancel()
+        + [invoke("splitforge.cut_adjust_plane"), key('WHEELUPMOUSE'), wait]
+        + [undo, key('WHEELUPMOUSE'), wait, redo, key('WHEELDOWNMOUSE'), wait] * 4
+        + [check_running(ADJUST), key('ESC'), wait, check_running(ADJUST, False)]
+        + [invoke("splitforge.cut_adjust_plane"), key('WHEELUPMOUSE'), wait, load_homefile, wait,
+           check_running(ADJUST, False), sf_printed_since_invoke("Adjust cut plane cancelled."),
+           sf_no_overlay_errors]
+    ),
+    "p1_panel": (
+        [sf_setup(1), set_oblique_view(1.8), sf_open_sidebar, wait] + [sf_tab_click, wait] * 40
+        + [sf_check_tab] + sf_scan()
+        + [sf_check_buttons(["add_x", "remove", "distribute", "build", CUT0_ENABLED]),
+           screenshot("panel_start")]
+        # Add X with the sidebar button, undo/redo with real key events
+        + press_button(BTN["add_x"])
+        + [sf_check("X button added a cut", lambda: (len(sf_cuts()) == 2, [c.name for c in sf_cuts()])),
+           ctrl_key('Z'), wait,
+           sf_check("Ctrl+Z removed it", lambda: (len(sf_cuts()) == 1, len(sf_cuts()))),
+           ctrl_key('Z', shift=True), wait,
+           sf_check("Ctrl+Shift+Z re-added it", lambda: (len(sf_cuts()) == 2, len(sf_cuts())))]
+        # Toggle the first cut off and on with its list checkbox
+        + press_button(CUT0_ENABLED)
+        + [sf_check("checkbox disabled cut 0", lambda: (not sf_cuts()[0].enabled, sf_cuts()[0].enabled))]
+        + press_button(CUT0_ENABLED)
+        + [sf_check("checkbox enabled cut 0", lambda: (sf_cuts()[0].enabled, sf_cuts()[0].enabled))]
+        # Remove the active (X) cut, add it again, distribute connectors on it
+        + press_button(BTN["remove"])
+        + [sf_check("remove button removed the active cut", lambda: ([c.name for c in sf_cuts()] == ["Cut Z"],
+                                                                      [c.name for c in sf_cuts()]))]
+        + press_button(BTN["add_x"]) + press_button(BTN["distribute"])
+        + [sf_check("Distribute added 2 connectors per seam region (Z splits the X seam: 4)",
+                    lambda: (len(sf_cuts()[1].connectors) == 4, len(sf_cuts()[1].connectors)))]
+        # The connector list moved the Build box down: find the buttons again
+        + sf_scan() + [sf_check_buttons(["build"])]
+        + press_button(BTN["build"]) + [wait, sf_check_build, screenshot("panel_built")]
+        # The panel is now taller than the sidebar: scroll it with the wheel, find the buttons again
+        + [sf_scroll_sidebar, wait] * 12
+        + sf_scan() + [sf_check_buttons(["export", "clear"])]
+        + press_button(BTN["export"]) + [sf_check_export]
+        + press_button(BTN["clear"])
+        + [sf_check("Clear removed the parts and shows the source",
+                    lambda: (not sf_parts() and not bpy.data.objects["GUI_Cube"].hide_get(), sf_parts())),
+           sf_no_overlay_errors]
     ),
     "adjust_undo_wheel": (
         [setup_cube, push_settings_change, invoke("snapsplit.adjust_split_axis"),
@@ -784,8 +1095,10 @@ def tick():
         step()
     except Exception:
         check(f"step {step.__name__} raised", False, traceback.format_exc())
-    write_report()  # keep a report on disk even if a later step crashes Blender
-    return 0.2
+    delay = getattr(step, "delay", None)
+    if delay is None:
+        write_report()  # keep a report on disk even if a later step crashes Blender
+    return delay or 0.2
 
 
 bpy.app.timers.register(tick, first_interval=2.0, persistent=True)

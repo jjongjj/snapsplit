@@ -9,7 +9,8 @@ the JSON reports and prints a summary. Exit code 0 only if every selected case
 passed in every Blender version.
 
 Usage:
-    python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow] [--gui]
+    python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow]
+                                [--gui [--gui-only] [--gui-scenario NAME]...]
 
 ``--gui`` additionally runs the modal-operator scenarios in ``tests/gui/gui_runner.py``
 (QA-1..QA-4 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
@@ -144,7 +145,8 @@ def run_blender(exe, args, timeout):
             "tmp": to_exe_path(TMP_DIR, exe)}
 
 
-GUI_SCENARIOS = ("qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
+GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel",
+                 "qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
                  "adjust_undo_wheel", "conn_undo", "load_adjust", "load_conn")
 GUI_SHOTS_DIR = os.path.join(OUT_DIR, "gui")
 
@@ -220,6 +222,10 @@ def main():
     ap.add_argument("--gui", action="store_true",
                     help="Also run the tests/gui scenarios (opens Blender windows with simulated "
                          "input; do not touch them while they run).")
+    ap.add_argument("--gui-scenario", action="append", default=[], metavar="NAME",
+                    help="With --gui: run only these scenarios (repeatable; default: all).")
+    ap.add_argument("--gui-only", action="store_true",
+                    help="With --gui: skip the headless cases.")
     args = ap.parse_args()
 
     exes = args.blender or [BL45, BL52]
@@ -229,7 +235,7 @@ def main():
         return 2
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    runs = [run_blender(exe, args, args.timeout) for exe in exes]
+    runs = [] if (args.gui and args.gui_only) else [run_blender(exe, args, args.timeout) for exe in exes]
 
     ok = True
     print("\n=== Summary")
@@ -261,8 +267,8 @@ def main():
         print("\n=== GUI scenarios (tests/gui/gui_runner.py)")
         for exe in exes:
             print(label_for(exe))
-            for scenario in GUI_SCENARIOS:
-                gui_ok, lines = run_gui(exe, scenario, min(args.timeout, 300.0))
+            for scenario in (args.gui_scenario or GUI_SCENARIOS):
+                gui_ok, lines = run_gui(exe, scenario, min(args.timeout, 400.0))
                 ok = ok and gui_ok
                 print("\n".join(lines), flush=True)
     print("RESULT: " + ("PASS" if ok else "FAIL"))
