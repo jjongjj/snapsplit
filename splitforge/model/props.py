@@ -24,7 +24,7 @@ from bpy.types import PropertyGroup
 
 from ..core import naming
 
-SCHEMA_VERSION = 3   # 2: STROKE cuts (points, direction); 3: all connector types
+SCHEMA_VERSION = 4   # 2: STROKE cuts (points, direction); 3: all connector types; 4: POLYLINE/POLYGON, depth
 
 CONNECTOR_KINDS = [
     ('CYL_PIN', "Cylinder pin", "Round pin; width is the diameter", 'MESH_CYLINDER', 0),
@@ -130,21 +130,25 @@ class SPLITFORGE_PG_Point(PropertyGroup):
 CUT_KINDS = [
     ('PLANE', "Plane", "Planar cut", 'MESH_PLANE', 0),
     ('STROKE', "Stroke", "Curved cut: a drawn stroke extruded along the view direction", 'CURVE_BEZCURVE', 1),
+    ('POLYLINE', "Polyline", "Cut along straight segments between clicked points, extruded along the view "
+     "direction", 'IPO_LINEAR', 2),
+    ('POLYGON', "Polygon", "Cut out the region inside a clicked closed polygon (a prism along the view "
+     "direction, through the object or Depth deep) as its own part", 'MESH_CIRCLE', 3),
 ]
 
 
 class SPLITFORGE_PG_Cut(PropertyGroup):
-    """One cut of the stack: a plane, or a stroke ribbon (points + direction).
+    """One cut of the stack: a plane, a stroke or polyline ribbon, or a polygon prism (points + direction).
 
-    For a STROKE cut ``origin``/``normal``/``tangent`` hold the seam frame at
-    the middle of the stroke (display only); the cut itself is ``points``
-    swept along ``direction``.
+    For STROKE/POLYLINE/POLYGON cuts ``origin``/``normal``/``tangent`` hold a
+    display frame only; the cut itself is ``points`` swept along ``direction``
+    (a polygon is closed; its prism ends ``depth_mm`` behind the object's front).
     """
     uid: StringProperty(name="ID", description="Stable identifier written onto built parts")
     enabled: BoolProperty(name="Enabled", default=True, update=_redraw)
     kind: EnumProperty(name="Kind", items=CUT_KINDS, default='PLANE', update=_redraw)
     points: CollectionProperty(type=SPLITFORGE_PG_Point,
-                               description="Stroke polyline (object local space), STROKE cuts only")
+                               description="Stroke / polyline / polygon points (object local space)")
     direction: FloatVectorProperty(name="Direction", size=3, default=(0.0, 1.0, 0.0), subtype='XYZ',
                                    update=_redraw,
                                    description="Extrusion direction of the stroke (object local space)")
@@ -157,6 +161,11 @@ class SPLITFORGE_PG_Cut(PropertyGroup):
                                  description="Seam frame U axis (projected into the plane)")
     gap_mm: FloatProperty(name="Gap (mm)", default=0.0, min=0.0, soft_max=5.0, precision=2,
                           update=_redraw, description="Material removed along the cut (kerf)")
+    depth_mm: FloatProperty(name="Depth (mm)", default=0.0, min=0.0, soft_max=200.0, precision=2,
+                            update=_redraw,
+                            description="Polygon cuts: how deep the cut-out reaches into the object from its "
+                                        "front along the view direction (0 = through the whole object); "
+                                        "connectors sit on the floor of a cut-out with a depth")
     cap: BoolProperty(name="Cap", default=True, description="Close the cut faces")
     connectors: CollectionProperty(type=SPLITFORGE_PG_Connector)
     active_connector: IntProperty(name="Active connector", default=0, min=0)
@@ -204,6 +213,9 @@ class SPLITFORGE_PG_Settings(PropertyGroup):
                                   description="Distance of the cut from the object's bounding box center")
     easy_gap_mm: FloatProperty(name="Gap (mm)", default=0.0, min=0.0, soft_max=5.0, precision=2,
                                description="Material removed along an Easy cut (kerf)")
+    easy_depth_mm: FloatProperty(name="Depth (mm)", default=0.0, min=0.0, soft_max=200.0, precision=2,
+                                 description="Easy polygon cut-out: how deep it reaches into the object from its "
+                                             "front along the view (0 = through the whole object, no connectors)")
     easy_connector_count: IntProperty(name="Connectors", default=2, min=0, max=16,
                                       description="Pins added along the seam (0 = none)")
     dowel_layout: EnumProperty(name="Dowel layout", default='FLAT', update=_dowel_layout_changed, items=[

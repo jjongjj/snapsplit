@@ -50,6 +50,10 @@ RIBBON_ASPECT = 6.0
 RIBBON_MAX_SLICES = 64
 
 
+# Cut kinds whose cutter is a ribbon (a drawn stroke, or straight segments between clicked points)
+RIBBON_KINDS = ('STROKE', 'POLYLINE')
+
+
 class StrokeError(ValueError):
     """The stroke cannot be turned into a valid cutter (message for the user)."""
 
@@ -475,13 +479,32 @@ class StrokeCutter:
         return distance_to_polyline(self.frame.to2d(p), self.extended)
 
 
-def build_cutter(points, direction, corners, gap=0.0):
+# Polyline cuts reuse the stroke rules; their messages speak of clicked points
+_POLYLINE_WORDS = (("drag across the object", "place the points across the object"),
+                   ("draw an open curve without loops", "place the points without loops"),
+                   ("draw a smoother curve", "use wider corners"),
+                   ("stroke", "polyline"))
+
+
+def build_cutter(points, direction, corners, gap=0.0, kind='STROKE'):
     """StrokeCutter for a stroke (world points, extrusion ``direction``) around an object.
 
     ``corners``: world points bounding the object (e.g. its bbox corners),
     ``gap``: kerf width (same unit). Raises StrokeError with a user message
-    when the stroke cannot be used.
+    when the stroke cannot be used (worded for ``kind`` STROKE or POLYLINE).
     """
+    try:
+        return _build_cutter(points, direction, corners, gap)
+    except StrokeError as ex:
+        if kind != 'POLYLINE':
+            raise
+        text = str(ex)
+        for old, new in _POLYLINE_WORDS:
+            text = text.replace(old, new)
+        raise StrokeError(text) from None
+
+
+def _build_cutter(points, direction, corners, gap=0.0):
     d = Vector(direction)
     if d.length < 1e-12:
         raise StrokeError("The stroke has no extrusion direction")
@@ -550,10 +573,14 @@ class Centerline:
     straight extension continues), ``v`` the depth along ``d`` from the stroke
     plane. ``frame(u)`` returns the seam frame (point, n, t): t the tangent
     (interpolated between vertex tangents), n = t x d the ribbon normal.
+    ``sharp`` (polyline cuts, cuts/polyline.py): the points are corners of
+    straight segments, so t is the direction of the segment (pins stand square
+    on its flat face; no interpolation across a corner).
     """
 
-    def __init__(self, frame, pts):
+    def __init__(self, frame, pts, sharp=False):
         self.frame = frame
+        self.sharp = sharp
         self.pts = list(pts)
         self.tans = vertex_tangents(self.pts)
         self.s = [0.0]
@@ -580,6 +607,9 @@ class Centerline:
         span = self.s[hi] - self.s[lo]
         f = (s - self.s[lo]) / span if span > 0.0 else 0.0
         (x0, y0), (x1, y1) = self.pts[lo], self.pts[hi]
+        if self.sharp:
+            t = _unit((x1 - x0, y1 - y0))
+            return (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f), t
         t0, t1 = self.tans[lo], self.tans[hi]
         t = _unit((t0[0] + (t1[0] - t0[0]) * f, t0[1] + (t1[1] - t0[1]) * f))
         return (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f), t
@@ -623,18 +653,18 @@ class Centerline:
         return m
 
 
-def centerline(cutter):
-    return Centerline(cutter.frame, cutter.curve)
+def centerline(cutter, sharp=False):
+    return Centerline(cutter.frame, cutter.curve, sharp)
 
 
-def curve_frame(points, direction):
+def curve_frame(points, direction, sharp=False):
     """(point, n, t) in the middle of a stroke (world points, extrusion direction)."""
     pts3 = [Vector(p) for p in points]
     frame = Frame.from_direction(direction, sum(pts3, Vector()) / len(pts3))
     pts = dedupe([frame.to2d(p) for p in pts3], 1e-12)
     if len(pts) < 2:
         raise StrokeError("The stroke is too short: drag across the object")
-    return Centerline(frame, pts).frame_at(0.0)
+    return Centerline(frame, pts, sharp).frame_at(0.0)
 
 
 def points_from_view(region, rv3d, coords, center, ray_fn=None):

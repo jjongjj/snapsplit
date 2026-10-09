@@ -14,10 +14,13 @@ visibility (``hide_set``) changes.
 Cuts are applied to every current piece in stack order:
 
 - PLANE: bisect with gap + cap (cuts/plane.py, no boolean)
-- STROKE: two boolean DIFFERENCEs with the ribbon cutters (cuts/stroke.py) on
-  pieces the ribbon touches, verified as a pair (volume conservation: part A +
-  part B + gap volume = piece) and retried with the next solver when the pair
-  does not add up; pieces it does not touch are kept whole on their side.
+- STROKE / POLYLINE: two boolean DIFFERENCEs with the ribbon cutters
+  (cuts/stroke.py) on pieces the ribbon touches, verified as a pair (volume
+  conservation: part A + part B + gap volume = piece) and retried with the next
+  solver when the pair does not add up; pieces it does not touch are kept whole
+  on their side.
+- POLYGON: the same, with part A = piece INTERSECT the inner prism (the
+  cut-out) and part B = piece DIFFERENCE the outer prism (cuts/polygon.py).
 
 ``build_steps`` is a generator that yields after each progress step (two per
 piece and cut, one per connector boolean), so the Build operator can run it
@@ -38,7 +41,7 @@ from ..connectors import fit, placement
 from ..connectors import shapes as conn_shapes
 from ..core import boolean, log, meshlib, naming, progress, units
 from ..model import stack as stack_api
-from . import plane, stroke
+from . import plane, polygon, stroke
 
 
 # Largest spacing of the connector surface samples (connectors/fit.py)
@@ -99,6 +102,7 @@ class PlaneCut:
 
 @dataclass
 class StrokeCut:
+    """A STROKE or POLYLINE cut (ribbon cutter); POLYLINE uses the sharp seam frame."""
     label: str
     uid: str
     cutter: object        # stroke.StrokeCutter
@@ -120,7 +124,7 @@ class StrokeCut:
 
     def centerline(self):
         if self._centerline is None:
-            self._centerline = stroke.centerline(self.cutter)
+            self._centerline = stroke.centerline(self.cutter, sharp=(self.kind == 'POLYLINE'))
         return self._centerline
 
     def matrix(self, u, v, rotation_deg):
@@ -128,6 +132,83 @@ class StrokeCut:
 
     def side(self, p):
         return 1 if self.barrier().positive(Vector(p)) else -1
+
+    # --- split (see _boolean_split) ---------------------------------------------
+
+    def split_surfaces(self):
+        """(surface BVH of side A's cutter, of side B's): crossing tests and seam areas."""
+        cutter = self.cutter
+        plus = ribbon_bvh(cutter, cutter.plus)
+        minus = plus if cutter.minus is cutter.plus else ribbon_bvh(cutter, cutter.minus)
+        return plus, minus, plus, minus
+
+    def keeps(self, probe):
+        """{side: True if a piece the cutter of that side does not cross is kept whole} for a point
+        ``probe`` of the piece."""
+        cutter = self.cutter
+        p2 = cutter.frame.to2d(probe)
+        return {'A': stroke.point_in_polygon(p2, stroke.left_polygon(cutter.plus, cutter.box)),
+                'B': not stroke.point_in_polygon(p2, stroke.left_polygon(cutter.minus, cutter.box))}
+
+    def operand(self, key):
+        """(operand bmesh, operation) producing side ``key`` from a piece."""
+        return (self.cutter.remove_for_a() if key == 'A' else self.cutter.remove_for_b()), 'DIFFERENCE'
+
+
+@dataclass
+class PolygonCut:
+    """A POLYGON cut: A = the cut-out region (inside the prism), B = the rest. Connectors sit on the
+    floor (a planar seam with normal -d) of a cut-out with a depth."""
+    label: str
+    uid: str
+    cutter: object        # polygon.PolygonCutter
+    gap: float
+    kind: str = 'POLYGON'
+    _barrier: object = None
+
+    def __post_init__(self):
+        self.co, self.n, self.t = self.cutter.floor_frame()
+
+    def barrier(self):
+        """fit.RibbonBarrier over the closed prism surface (walls and floor), exact side test."""
+        if self._barrier is None:
+            bm = self.cutter.solid()
+            try:
+                self._barrier = fit.RibbonBarrier(BVHTree.FromBMesh(bm), self.gap, self.cutter.is_inside)
+            finally:
+                bm.free()
+        return self._barrier
+
+    def matrix(self, u, v, rotation_deg):
+        return placement.frame_matrix(self.co, self.n, self.t, u, v, rotation_deg)
+
+    def side(self, p):
+        return 1 if self.cutter.is_inside(Vector(p)) else -1
+
+    def split_surfaces(self):
+        cutter = self.cutter
+        out = []
+        for maker in (lambda: stroke.prism(cutter.inner, cutter.frame, cutter.z0, cutter.z_floor),
+                      lambda: stroke.prism(cutter.outer, cutter.frame, cutter.z0, cutter.z_floor),
+                      lambda: cutter.walls(cutter.inner), lambda: cutter.walls(cutter.outer)):
+            bm = maker()
+            try:
+                out.append(BVHTree.FromBMesh(bm))
+            finally:
+                bm.free()
+        return tuple(out)
+
+    def keeps(self, probe):
+        cutter = self.cutter
+        p2 = cutter.frame.to2d(probe)
+        in_front = cutter.frame.depth(probe) <= cutter.z_floor
+        return {'A': in_front and stroke.point_in_polygon(p2, cutter.inner),
+                'B': not (in_front and stroke.point_in_polygon(p2, cutter.outer))}
+
+    def operand(self, key):
+        if key == 'A':
+            return self.cutter.inside_solid(), 'INTERSECT'
+        return self.cutter.outside_remove(), 'DIFFERENCE'
 
 
 def stroke_world(matrix_world, cut):
@@ -142,16 +223,24 @@ def world_corners(obj):
 
 
 def cut_spec(obj, cut, scene):
-    """PlaneCut/StrokeCut of a stack cut in world space (BU). Raises BuildError for a bad stroke."""
+    """PlaneCut/StrokeCut/PolygonCut of a stack cut in world space (BU). Raises BuildError for a bad
+    stroke, polyline or polygon."""
     mm = units.mm_to_scene(1.0, scene)
     gap = cut.gap_mm * mm
-    if cut.kind == 'STROKE':
+    if cut.kind in stroke.RIBBON_KINDS:
         points, d = stroke_world(obj.matrix_world, cut)
         try:
-            cutter = stroke.build_cutter(points, d, world_corners(obj), gap)
+            cutter = stroke.build_cutter(points, d, world_corners(obj), gap, cut.kind)
         except stroke.StrokeError as ex:
             raise BuildError(f"{cut.name}: {ex}") from None
-        return StrokeCut(cut.name, cut.uid, cutter, gap)
+        return StrokeCut(cut.name, cut.uid, cutter, gap, cut.kind)
+    if cut.kind == 'POLYGON':
+        points, d = stroke_world(obj.matrix_world, cut)
+        try:
+            cutter = polygon.build_cutter(points, d, world_corners(obj), gap, cut.depth_mm * mm)
+        except stroke.StrokeError as ex:
+            raise BuildError(f"{cut.name}: {ex}") from None
+        return PolygonCut(cut.name, cut.uid, cutter, gap)
     co, n, t, _b = plane.world_frame(obj.matrix_world, cut.origin, cut.normal, cut.tangent)
     return PlaneCut(cut.name, cut.uid, co, n, t, gap, cut.cap)
 
@@ -229,26 +318,25 @@ def cap_area(bm, bvh, eps):
     return area
 
 
-def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings):
-    """Generator: (positive, negative) bmeshes of a piece cut by a StrokeCut (2 progress steps).
+def _boolean_split(piece, spec, quality, self_intersect, prog, booleans, warnings):
+    """Generator: (positive, negative) bmeshes of a piece cut by a StrokeCut or PolygonCut (2 progress steps).
 
-    A side is computed with a boolean only where the piece crosses that side's
-    ribbon; otherwise the piece lies wholly on one side (kept as a copy, or
-    nothing). With both sides cut, the pair must conserve the volume (tightly,
-    unless shells intersect or the voxel fallback was used); if not, both are
-    redone with the solvers after the ones that produced them. A voxel fallback
-    is reported in ``warnings``.
+    A side is computed with a boolean (``spec.operand``) only where the piece
+    crosses that side's cutter surface; otherwise the piece lies wholly on one
+    side (kept as a copy, or nothing). With both sides cut, the pair must
+    conserve the volume (tightly, unless shells intersect or the voxel fallback
+    was used): A + B + gap volume = piece, the gap volume being the gap / 2
+    times each side's seam area on its cutter's walls. If not, both are redone
+    with the solvers after the ones that produced them. A voxel fallback is
+    reported in ``warnings``.
     """
-    cutter = spec.cutter
     piece_bvh = BVHTree.FromBMesh(piece)
     tri = None
-    plus_bvh = ribbon_bvh(cutter, cutter.plus)
-    minus_bvh = plus_bvh if cutter.minus is cutter.plus else ribbon_bvh(cutter, cutter.minus)
-    crosses = {'A': bool(piece_bvh.overlap(plus_bvh)), 'B': bool(piece_bvh.overlap(minus_bvh))}
-    probe = cutter.frame.to2d(next(iter(piece.verts)).co) if piece.verts else (0.0, 0.0)
-    keep = {'A': stroke.point_in_polygon(probe, stroke.left_polygon(cutter.plus, cutter.box)),
-            'B': not stroke.point_in_polygon(probe, stroke.left_polygon(cutter.minus, cutter.box))}
-    makers = {'A': cutter.remove_for_a, 'B': cutter.remove_for_b}
+    cross_a, cross_b, seam_a, seam_b = spec.split_surfaces()
+    crosses = {'A': bool(piece_bvh.overlap(cross_a)), 'B': bool(piece_bvh.overlap(cross_b))}
+    probe = next(iter(piece.verts)).co.copy() if piece.verts else Vector()
+    keep = spec.keeps(probe)
+    what = "curved" if spec.kind == 'STROKE' else spec.kind.lower()
 
     order = boolean.attempt_order(quality, self_intersect, faces=len(piece.faces))
     start = 0
@@ -265,16 +353,19 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
                     tri = piece.copy()
                     tri.normal_update()   # n-gons are triangulated in their plane: normals must be current
                     bmesh.ops.triangulate(tri, faces=tri.faces[:])
-                operand = makers[key]()
+                operand, operation = spec.operand(key)
                 try:
-                    res, bm = boolean.apply_bm(tri, operand, 'DIFFERENCE', quality, order=order[start:])
+                    res, bm = boolean.apply_bm(tri, operand, operation, quality, order=order[start:])
                 finally:
                     operand.free()
                 results[key] = res
                 booleans.append((f"{spec.label} side {key}", res.solver, res.attempts))
                 if not res.ok:
-                    raise BuildError(f"{spec.label}: the curved cut failed with every boolean solver "
+                    raise BuildError(f"{spec.label}: the {what} cut failed with every boolean solver "
                                      f"({res.message}). Nothing was changed.")
+                if bm is not None and not bm.faces:
+                    bm.free()
+                    bm = None
                 out[key] = bm
         except BaseException:
             for bm in out.values():
@@ -288,9 +379,11 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
                 tri.free()
             return out['A'], out['B']
         volume = meshlib.bm_volume(tri)
-        va, vb = meshlib.bm_volume(out['A']), meshlib.bm_volume(out['B'])
+        va = meshlib.bm_volume(out['A']) if out['A'] is not None else 0.0
+        vb = meshlib.bm_volume(out['B']) if out['B'] is not None else 0.0
         eps = max(meshlib.bm_diagonal(piece) * 1e-4, 1e-6)
-        gap_volume = cutter.gap * 0.5 * (cap_area(out['A'], plus_bvh, eps) + cap_area(out['B'], minus_bvh, eps))
+        gap_volume = spec.gap * 0.5 * ((cap_area(out['A'], seam_a, eps) if out['A'] is not None else 0.0)
+                                       + (cap_area(out['B'], seam_b, eps) if out['B'] is not None else 0.0))
         loose = self_intersect or any(r.solver == boolean.VOXEL for r in results.values())
         diag = meshlib.bm_diagonal(piece)
         tight = volume * PAIR_TOLERANCE + PAIR_ABS_TOLERANCE * diag ** 3
@@ -305,7 +398,8 @@ def _stroke_split(piece, spec, quality, self_intersect, prog, booleans, warnings
         msg = (f"{spec.label}: parts A + B = {va + vb:.6g} for a piece of {volume:.6g} "
                f"(gap {gap_volume:.6g}) with {', '.join(r.solver for r in results.values())}")
         for bm in out.values():
-            bm.free()
+            if bm is not None:
+                bm.free()
         if used + 1 >= len(order):
             tri.free()
             raise BuildError(msg + "; no solver left. Nothing was changed.")
@@ -330,9 +424,9 @@ def iter_cut_pieces(bm, specs, warnings, quality='AUTO', prog=None, self_interse
             while pieces:
                 piece = pieces.pop(0)
                 try:
-                    if spec.kind == 'STROKE':
-                        pos, neg = yield from _stroke_split(piece.bm, spec, quality, self_intersect, prog,
-                                                            booleans, warnings)
+                    if spec.kind != 'PLANE':
+                        pos, neg = yield from _boolean_split(piece.bm, spec, quality, self_intersect, prog,
+                                                             booleans, warnings)
                     else:
                         pos, neg = yield from _plane_split(piece.bm, spec, warnings, prog)
                 finally:

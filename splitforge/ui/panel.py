@@ -37,7 +37,7 @@ class SPLITFORGE_UL_cuts(UIList):
         row = layout.row(align=True)
         row.prop(item, "enabled", text="")
         row.prop(item, "name", text="", emboss=False)
-        if item.kind == 'STROKE' and stack_api.stroke_problem_cached(item.id_data, item, context.scene):
+        if stack_api.is_point_cut(item) and stack_api.stroke_problem_cached(item.id_data, item, context.scene):
             row.label(text="", icon='ERROR')
 
 
@@ -166,6 +166,11 @@ def draw_easy(context, layout):
     draw = row.row(align=True)
     draw.operator_context = 'INVOKE_REGION_WIN'
     draw.operator(OP("stack_add_stroke"), text="Draw Cut", icon='CURVE_BEZCURVE').easy = True
+    row = layout.row(align=True)
+    row.operator_context = 'INVOKE_REGION_WIN'
+    row.operator(OP("stack_add_polyline"), text="Polyline", icon='IPO_LINEAR').easy = True
+    row.operator(OP("stack_add_polygon"), text="Cut Out", icon='MESH_CIRCLE').easy = True
+    layout.prop(s, "easy_depth_mm")
 
 
 def draw_draft(context, layout, stack):
@@ -177,6 +182,8 @@ def draw_draft(context, layout, stack):
     stroke_col = col.column(align=True)
     stroke_col.operator_context = 'INVOKE_REGION_WIN'
     stroke_col.operator(OP("stack_add_stroke"), text="", icon='CURVE_BEZCURVE')
+    stroke_col.operator(OP("stack_add_polyline"), text="", icon='IPO_LINEAR')
+    stroke_col.operator(OP("stack_add_polygon"), text="", icon='MESH_CIRCLE')
     col.separator()
     col.operator(OP("stack_remove"), text="", icon='REMOVE')
     col.operator(OP("stack_duplicate"), text="", icon='DUPLICATE')
@@ -187,7 +194,7 @@ def draw_draft(context, layout, stack):
     col.operator(OP("stack_clear"), text="", icon='TRASH')
 
     if not stack.cuts:
-        layout.label(text="Add a cut (X/Y/Z or stroke), then Build", icon='INFO')
+        layout.label(text="Add a cut (X/Y/Z, stroke, polyline or polygon), then Build", icon='INFO')
         return
     cut = stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
     box = layout.box()
@@ -196,8 +203,10 @@ def draw_draft(context, layout, stack):
               translate=False)
     row = box.row(align=True)
     row.prop(cut, "enabled")
-    if cut.kind == 'STROKE':
+    if stack_api.is_point_cut(cut):
         box.prop(cut, "gap_mm")
+        if cut.kind == 'POLYGON':
+            box.prop(cut, "depth_mm")
         problem = stack_api.stroke_problem_cached(stack_api.context_owner(context), cut, context.scene)
         if problem:
             col = box.column(align=True)
@@ -205,11 +214,11 @@ def draw_draft(context, layout, stack):
             col.label(text="Cannot build this cut:", icon='ERROR')
             for line in _wrap(problem, 34):
                 col.label(text=line)
-        box.label(text=tr("Stroke: {n} points", n=len(cut.points)), translate=False, icon='CURVE_BEZCURVE')
+        label, icon, op = POINT_CUT_UI[cut.kind]
+        box.label(text=tr(label, n=len(cut.points)), translate=False, icon=icon)
         op_row = box.row()
         op_row.operator_context = 'INVOKE_REGION_WIN'
-        op_row.operator(OP("stack_add_stroke"), text="Redraw in Viewport",
-                        icon='GREASEPENCIL').replace_uid = cut.uid
+        op_row.operator(OP(op), text="Redraw in Viewport", icon='GREASEPENCIL').replace_uid = cut.uid
         return
     row.prop(cut, "cap")
     box.prop(cut, "gap_mm")
@@ -220,6 +229,12 @@ def draw_draft(context, layout, stack):
     op_row = box.row()
     op_row.operator_context = 'INVOKE_REGION_WIN'
     op_row.operator(OP("cut_adjust_plane"), text="Adjust in Viewport", icon='ORIENTATION_GLOBAL')
+
+
+# Point cuts in the cut box: (label template, icon, redraw operator)
+POINT_CUT_UI = {'STROKE': ("Stroke: {n} points", 'CURVE_BEZCURVE', "stack_add_stroke"),
+                'POLYLINE': ("Polyline: {n} points", 'IPO_LINEAR', "stack_add_polyline"),
+                'POLYGON': ("Polygon: {n} corners", 'MESH_CIRCLE', "stack_add_polygon")}
 
 
 def _wrap(text, width):

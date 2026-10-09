@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""P1-3 / P3: the cut stack PropertyGroups survive save/load and add-on disable/enable.
+"""P1-3 / P3 / P4: the cut stack PropertyGroups survive save/load and add-on disable/enable.
 
 Includes every connector type and its per-type values (taper, insert depth, chamfer, snap
-bumps, custom mesh object pointer) and the scene's new-connector template.
+bumps, custom mesh object pointer), the scene's new-connector template, and (schema 4) the
+polyline and polygon cut kinds with a polygon depth.
 """
 
 import os
@@ -31,6 +32,12 @@ def _fill(obj):
     stroke.direction = (0.0, 0.6, 0.8)
     for k in range(5):
         stroke.points.add().co = (k * 3.0 - 6.0, 0.5 * k, -0.25 * k * k)
+    for kind, depth in (('POLYLINE', 0.0), ('POLYGON', 7.5)):
+        extra = stack.cuts.add()
+        extra.name, extra.uid, extra.kind, extra.depth_mm = kind.title(), f"C{len(stack.cuts)}", kind, depth
+        extra.direction = (0.0, 0.0, -1.0)
+        for co in ((-5.0, -5.0, 9.0), (5.0, -5.0, 9.0), (0.0, 6.0, 9.0)):
+            extra.points.add().co = co
     stack.active_index = 1
     stack.mode = 'EASY'
     for j in range(3):
@@ -72,7 +79,7 @@ def _snapshot(obj):
         cuts.append((cut.name, cut.uid, cut.enabled, cut.kind, tuple(round(x, 5) for x in cut.origin),
                      tuple(round(x, 5) for x in cut.normal), round(cut.gap_mm, 5), cut.cap,
                      cut.distribution, cut.connector_rows, conns, tuple(round(x, 5) for x in cut.direction),
-                     [tuple(round(x, 5) for x in p.co) for p in cut.points]))
+                     [tuple(round(x, 5) for x in p.co) for p in cut.points], round(cut.depth_mm, 5)))
     t = bpy.context.scene.splitforge.new_connector
     template = (t.kind, round(t.width_mm, 5), round(t.taper_pct, 5), t.custom_object.name if t.custom_object else None)
     return (stack.active_index, stack.mode, stack.schema_version, cuts, bpy.context.scene.splitforge.boolean_quality,
@@ -86,8 +93,9 @@ def run(ctx):
     _fill(cube)
     bpy.context.scene.splitforge.boolean_quality = 'FAST'
     before = _snapshot(cube)
-    assert len(before[3]) == 3 and sum(len(c[10]) for c in before[3]) == 8, before
-    assert before[3][2][3] == 'STROKE' and len(before[3][2][12]) == 5 and before[2] == 3 and before[4] == 'FAST', before
+    assert len(before[3]) == 5 and sum(len(c[10]) for c in before[3]) == 8, before
+    assert before[3][2][3] == 'STROKE' and len(before[3][2][12]) == 5 and before[2] == 4 and before[4] == 'FAST', before
+    assert [(c[3], c[13]) for c in before[3][3:]] == [('POLYLINE', 0.0), ('POLYGON', 7.5)], before[3][3:]
     assert [c[1] for c in before[3][0][10]][2:] == ['DOVETAIL', 'SNAP_PIN', 'SNAP_DOVETAIL', 'CUSTOM', 'DOWEL']
     assert before[3][0][10][5][16] == "ModelKnob" and before[5] == ('SNAP_TENON', 7.5, 33.0, "ModelKnob"), before
 

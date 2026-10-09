@@ -12,10 +12,10 @@ import bpy
 from mathutils import Vector
 
 from ..core import meshlib, naming
-from ..cuts import plane, stroke
+from ..cuts import plane, polygon, stroke
 
-CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "distribution",
-              "connector_count", "connector_rows", "margin_pct")
+CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "depth_mm", "cap",
+              "distribution", "connector_count", "connector_rows", "margin_pct")
 # Connector type and size (copied from the scene's new-connector template onto new connectors)
 TEMPLATE_FIELDS = ("kind", "rotation_deg", "width_mm", "height_mm", "length_mm", "pin_side", "clearance_mm",
                    "embed_pct", "taper_pct", "chamfer_mm", "snap_count", "snap_diameter_mm",
@@ -83,14 +83,21 @@ def add_cut(obj, origin, normal, tangent=None, name=None):
     return stack.active_index
 
 
-def set_stroke(cut, points, direction):
-    """Store a stroke (object-local points and extrusion direction) on ``cut``.
+def set_stroke(cut, points, direction, kind='STROKE', corners=None):
+    """Store a point cut (object-local points and extrusion direction) on ``cut``.
 
-    The display frame (origin/normal/tangent) is the seam frame in the middle of
-    the stroke. Raises stroke.StrokeError for a degenerate stroke.
+    ``kind``: STROKE (drawn), POLYLINE (clicked corners) or POLYGON (closed,
+    clicked; ``corners``: the object's local bounding box corners). The display
+    frame (origin/normal/tangent) is the seam frame in the middle of the stroke /
+    polyline, or for a polygon its area centroid at the prism's far end (display
+    only; the floor depends on Depth and the unit scale). Raises
+    stroke.StrokeError for a degenerate stroke.
     """
-    co, n, t = stroke.curve_frame(points, direction)
-    cut.kind = 'STROKE'
+    if kind == 'POLYGON':
+        co, n, t = polygon.polygon_frame(points, direction, corners or points)
+    else:
+        co, n, t = stroke.curve_frame(points, direction, sharp=(kind == 'POLYLINE'))
+    cut.kind = kind
     cut.points.clear()
     for p in points:
         cut.points.add().co = Vector(p)
@@ -101,17 +108,30 @@ def set_stroke(cut, points, direction):
 
 
 def stroke_problem(obj, cut, scene):
-    """'' if the stroke cut can be built with its gap on ``obj``, else the reason (StrokeError text)."""
+    """'' if the stroke / polyline / polygon cut can be built with its gap (and depth) on ``obj``,
+    else the reason (StrokeError text)."""
     from ..core import units
     m = obj.matrix_world
     points = [m @ p for p in stroke_points(cut)]
     d = (m.to_3x3() @ Vector(cut.direction)).normalized()
     corners = [m @ Vector(c) for c in obj.bound_box]
     try:
-        stroke.build_cutter(points, d, corners, units.mm_to_scene(cut.gap_mm, scene))
+        if cut.kind == 'POLYGON':
+            polygon.build_cutter(points, d, corners, units.mm_to_scene(cut.gap_mm, scene),
+                                 units.mm_to_scene(cut.depth_mm, scene))
+        else:
+            stroke.build_cutter(points, d, corners, units.mm_to_scene(cut.gap_mm, scene), cut.kind)
     except stroke.StrokeError as ex:
         return str(ex)
     return ""
+
+
+def is_point_cut(cut):
+    """True for cuts defined by points + direction (stroke, polyline, polygon)."""
+    return cut.kind in POINT_KINDS
+
+
+POINT_KINDS = ('STROKE', 'POLYLINE', 'POLYGON')
 
 
 # (object name, cut uid) -> (inputs, message): the panel asks on every redraw; the stroke check
@@ -124,7 +144,8 @@ def stroke_problem_cached(obj, cut, scene):
     """stroke_problem() for drawing code: recomputed only when its inputs changed."""
     inputs = (tuple(round(x, 9) for row in obj.matrix_world for x in row),
               tuple(round(x, 9) for c in obj.bound_box for x in c),
-              round(scene.unit_settings.scale_length, 12), round(cut.gap_mm, 9), tuple(cut.direction),
+              round(scene.unit_settings.scale_length, 12), round(cut.gap_mm, 9), round(cut.depth_mm, 9),
+              cut.kind, tuple(cut.direction),
               len(cut.points), hash(tuple(tuple(p.co) for p in cut.points)))
     key = (obj.name, cut.uid)
     hit = _PROBLEMS.get(key)
@@ -140,17 +161,23 @@ def stroke_points(cut):
     return [Vector(p.co) for p in cut.points]
 
 
-def add_stroke_cut(obj, points, direction, name=None):
-    """Append a stroke cut (object-local points + direction) and make it active. Returns its index."""
+KIND_NAMES = {'STROKE': "Stroke", 'POLYLINE': "Polyline", 'POLYGON': "Polygon"}
+
+
+def add_stroke_cut(obj, points, direction, name=None, kind='STROKE', depth_mm=0.0, gap_mm=0.0):
+    """Append a point cut (object-local points + direction; ``kind`` STROKE, POLYLINE or POLYGON) and
+    make it active. Returns its index."""
     stack = get_stack(obj)
     cut = stack.cuts.add()
+    cut.depth_mm = depth_mm
+    cut.gap_mm = gap_mm
     try:
-        set_stroke(cut, points, direction)
+        set_stroke(cut, points, direction, kind, [Vector(c) for c in obj.bound_box])
     except stroke.StrokeError:
         stack.cuts.remove(len(stack.cuts) - 1)
         raise
     cut.uid = _new_uid(stack)
-    cut.name = name or f"Stroke {len(stack.cuts)}"
+    cut.name = name or f"{KIND_NAMES[kind]} {len(stack.cuts)}"
     stack.active_index = len(stack.cuts) - 1
     return stack.active_index
 
