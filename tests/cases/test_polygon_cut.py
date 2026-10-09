@@ -180,9 +180,9 @@ def run(ctx):
     tiny = new_cube("PGTiny")
     for side in (0.01, 0.1, 0.4):
         sq = [(0.0, 0.0, 30.0), (side, 0.0, 30.0), (side, side, 30.0), (0.0, side, 30.0)]
-        expect_error(lambda: add(sq, depth_mm=5.0), "too small or too narrow")
+        expect_error(lambda: add(sq, depth_mm=5.0), "too narrow to cut out")
     expect_error(lambda: add([(-10, 0, 30), (10, 0, 30), (10, 0.2, 30), (-10, 0.2, 30)], depth_mm=5.0),
-                 "too small or too narrow")
+                 "too narrow to cut out")
     assert len(tiny.splitforge_stack.cuts) == 0
     half_mm = [(0.0, 0.0, 30.0), (0.5, 0.0, 30.0), (0.5, 0.5, 30.0), (0.0, 0.5, 30.0)]
     assert add(half_mm, depth_mm=5.0) == {'FINISHED'}
@@ -191,10 +191,48 @@ def run(ctx):
     stored = tiny.splitforge_stack.cuts[0]
     for p, co in zip(stored.points, [(0, 0, 30), (0.05, 0, 30), (0.05, 0.05, 30), (0, 0.05, 30)]):
         p.co = co
-    assert "too small" in stack_api.stroke_problem_cached(tiny, stored, bpy.context.scene)
+    assert "too narrow" in stack_api.stroke_problem_cached(tiny, stored, bpy.context.scene)
     lib.select_only([tiny])
     tiny.hide_set(False)
-    expect_error(lambda: bpy.ops.splitforge.build(), "too small")
+    expect_error(lambda: bpy.ops.splitforge.build(), "too narrow")
+
+    # --- D22: small but valid pockets on large objects build (the volume rule follows the boolean check) ---
+    def square(cx, side, z):
+        h = side * 0.5
+        return [(cx - h, -h, z), (cx + h, -h, z), (cx + h, h, z), (cx - h, h, z)]
+
+    for size, side, depth in ((300.0, 4.0, 10.0), (300.0, 6.0, 5.0), (500.0, 10.0, 5.0), (40.0, 1.0, 0.5)):
+        big = lib.make_cube(size)
+        big.name = f"PGBig{size:g}_{side:g}_{depth:g}"
+        lib.select_only([big])
+        assert add(square(0.0, side, size), depth_mm=depth) == {'FINISHED'}, big.name
+        res = build.build(bpy.context, big)
+        plug = bpy.data.objects[f"{big.name}_A"]
+        assert len(res.parts) == 2 and lib.is_manifold(plug), (big.name, res.parts)
+        lib.assert_close(lib.volume(plug), side * side * depth, rel=1e-3, msg=big.name)
+        ctx.metric(big.name, f"plug {lib.volume(plug):.3f} {[b[1] for b in res.booleans]}")
+    # a pocket stored by 0.4.0 on a 500 mm cube (no add-time check then) still builds
+    old = lib.make_cube(500.0)
+    old.name = "PGOld"
+    stack = old.splitforge_stack
+    cut = stack.cuts.add()
+    cut.uid, cut.name, cut.kind, cut.depth_mm, cut.direction = "C1", "Pocket", 'POLYGON', 5.0, (0.0, 0.0, -1.0)
+    for co in square(0.0, 10.0, 500.0):
+        cut.points.add().co = co
+    assert stack_api.stroke_problem_cached(old, cut, bpy.context.scene) == ""
+    res = build.build(bpy.context, old)
+    lib.assert_close(lib.volume(bpy.data.objects["PGOld_A"]), 500.0, rel=1e-3, msg="0.4.0 pocket")
+    # each refusal names the check that failed
+    small = new_cube("PGSmallChecks")
+    for side in (0.01, 0.2, 0.49):
+        expect_error(lambda: add(square(0.0, side, 30.0), depth_mm=5.0), "too narrow to cut out")
+    expect_error(lambda: add(square(0.0, 4.0, 30.0), depth_mm=0.1), "too shallow")
+    huge = lib.make_cube(2000.0)
+    huge.name = "PGHuge"
+    lib.select_only([huge])
+    msg = expect_error(lambda: add(square(0.0, 1.0, 2000.0), depth_mm=1.0), "too small for an object this large")
+    assert "mm^3" in msg, msg
+    del small
 
     # --- Easy cut-out ---------------------------------------------------------------------------
     easy = new_cube("PGE")

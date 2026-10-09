@@ -37,15 +37,22 @@ from dataclasses import dataclass
 import bmesh
 from mathutils import Vector
 
+from ..core.boolean import VOLUME_TOLERANCE
 from . import stroke
 
 MARGIN_FRACTION = stroke.MARGIN_FRACTION
-# Smallest cut-out (defect D21): about MIN_SIZE_MM across -- 2 x area / perimeter at least half of it
-# (a square of side MIN_SIZE_MM, a strip MIN_SIZE_MM / 2 wide) -- and its volume inside the object's
-# bounding box at least MIN_VOLUME_SHARE of that box: smaller pieces are below what the boolean result
-# checks can tell from float noise (and below anything printable).
+# Smallest cut-out (defects D21, D22), three checks with their own messages:
+# - width: about MIN_SIZE_MM across (2 x area / perimeter >= MIN_SIZE_MM / 2: a square of side
+#   MIN_SIZE_MM, a strip MIN_SIZE_MM / 2 wide) -- absolute, below anything printable;
+# - depth: at least MIN_DEPTH_MM of the object inside the prism (absolute);
+# - volume: the volume it removes must be visible to the boolean result check (core/boolean.py rejects a
+#   DIFFERENCE that does not shrink the piece by more than VOLUME_TOLERANCE x its volume, float noise):
+#   at least VOLUME_MARGIN x that tolerance of the object's bounding box volume (an upper bound of any
+#   piece). Only this one grows with the object, and only as far as the boolean check really needs
+#   (a 500 mm cube: 250 mm^3, a 10 x 10 x 5 mm pocket is 500). D21 used 1e-5 of the box (10x too strict).
 MIN_SIZE_MM = 0.5
-MIN_VOLUME_SHARE = 1e-5
+MIN_DEPTH_MM = 0.2
+VOLUME_MARGIN = 2.0
 
 
 def signed_area(poly):
@@ -263,9 +270,18 @@ def build_cutter(points, direction, corners, gap=0.0, depth=0.0, mm=0.0):
         width = 2.0 * abs(area) / perimeter
         box = [max(c[i] for c in corners) - min(c[i] for c in corners) for i in range(3)]
         thickness = (back - front) if through else min(depth, back - front)
-        if width < min_width * (1.0 - 1e-6) or abs(area) * thickness < MIN_VOLUME_SHARE * box[0] * box[1] * box[2]:
-            raise stroke.StrokeError(f"The polygon is too small or too narrow to cut out: draw a region at least "
-                                     f"{MIN_SIZE_MM:g} mm across")
+        volume = abs(area) * thickness
+        needed = VOLUME_MARGIN * VOLUME_TOLERANCE * box[0] * box[1] * box[2]
+        if width < min_width * (1.0 - 1e-6):
+            raise stroke.StrokeError(f"The polygon is too narrow to cut out ({2.0 * width / mm:.3g} mm across): "
+                                     f"draw a region at least {MIN_SIZE_MM:g} mm across")
+        if thickness < MIN_DEPTH_MM * mm * (1.0 - 1e-6):
+            raise stroke.StrokeError(f"The cut-out is too shallow ({thickness / mm:.3g} mm): set a Depth of at "
+                                     f"least {MIN_DEPTH_MM:g} mm")
+        if volume < needed:
+            raise stroke.StrokeError(f"The cut-out is too small for an object this large ({volume / mm ** 3:.3g} "
+                                     f"mm^3; the booleans need at least {needed / mm ** 3:.3g} mm^3 here): draw "
+                                     "a larger region or a deeper cut-out")
     return PolygonCutter(frame, poly, inner, outer, z0, z_floor, max(gap, 0.0), through)
 
 

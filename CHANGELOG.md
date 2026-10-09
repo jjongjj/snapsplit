@@ -10,8 +10,11 @@ Fixed
   narrowed the kerf along both segments next to a corner under ~30 degrees and Build failed with "no
   solver left"); corners under 15 degrees are refused with a gap, at add time and in the panel check.
   Polygons the same.
-- Tiny polygon cut-outs (D21): under 0.5 mm across they are refused at add time and in the panel check
-  instead of failing at Build.
+- Tiny polygon cut-outs (D21, D22): refused at add time and in the panel check instead of failing at
+  Build, each with its own reason: narrower than 0.5 mm, shallower than 0.2 mm, or removing less volume
+  than the boolean result check can see on an object that large (2 x 1e-6 of its bounding box volume:
+  250 mm^3 on a 500 mm cube). (A first version scaled the volume limit 10x too strictly and refused
+  normal pockets on large objects; fixed before release.)
 - A floor connector of a polygon cut-out too close to its wall is skipped / dropped with a message about
   the cut-out's wall (it said "the curved seam bends into it").
 - Placing points after orbiting the view: Ctrl's 15 degree steps and closing a polygon on its first
