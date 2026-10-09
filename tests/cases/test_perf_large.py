@@ -29,6 +29,11 @@ def run(ctx):
     ctx.metric("split_s", round(time.perf_counter() - t0, 2))
     parts = [o for o in bpy.context.selected_objects if o.type == 'MESH']
     assert len(parts) == 3, [o.name for o in parts]
+    # The cut through the eyes once made capping random (eye loops sometimes
+    # taken as holes of the head loop); face counts must now be identical per run.
+    ctx.metric("part_faces", "/".join(str(len(p.data.polygons)) for p in sorted(parts, key=lambda o: o.name)))
+    for p in parts:
+        assert lib.is_manifold(p), f"{p.name} not manifold after split"
 
     props.connector_type = 'CYL_PIN'
     props.connectors_per_seam = 3
