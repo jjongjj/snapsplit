@@ -103,56 +103,81 @@ WINDING_GRID = 96
 _WINDING_JITTER = (0.3819660, 0.6180340)
 
 
-def winding_volume(bm, grid=WINDING_GRID, bounds=None):
+def winding_volume(bm, grid=WINDING_GRID, bounds=None, axis=2, bvh=None):
     """Volume of the region a mesh encloses with winding number > 0 (overlaps counted once).
 
-    Integrates along ``grid`` x ``grid`` parallel rays (+Z) over the XY bounds
-    (``bounds`` = (x0, x1, y0, y1, z0), default the mesh's): every surface
-    crossing changes the winding number by +-1 (by the face normal), and the
-    ray length where it is positive is summed. For intersecting shells this is
-    the volume of their union, independent of any boolean solver; it is a
-    sampled estimate (comparable between meshes only on the same ``bounds``).
-    Inward-facing cavity shells subtract as they should.
+    Integrates along ``grid`` x ``grid`` parallel rays along ``axis`` (0/1/2 =
+    X/Y/Z) over the bounds of the other two axes (``bounds`` = (mins, maxs),
+    default the mesh's, see bm_box): every surface crossing changes the winding
+    number by +-1 (by the face normal), and the ray length where it is positive
+    is summed. For intersecting shells this is the volume of their union,
+    independent of any boolean solver; it is a sampled estimate (comparable
+    between meshes only on the same ``bounds`` and axis). Inward-facing cavity
+    shells subtract as they should. A shell thinner than the ray spacing across
+    the rays can slip between them: compare along all three axes
+    (winding_volumes).
     """
     from mathutils.bvhtree import BVHTree
     if not bm.faces:
         return 0.0
-    if bounds is None:
-        bounds = bm_bounds(bm)
-    x0, x1, y0, y1, z0 = bounds
-    dx, dy = (x1 - x0) / grid, (y1 - y0) / grid
-    if dx <= 0.0 or dy <= 0.0:
+    mins, maxs = bounds if bounds is not None else bm_box(bm)
+    u, w = [k for k in range(3) if k != axis]
+    du, dw = (maxs[u] - mins[u]) / grid, (maxs[w] - mins[w]) / grid
+    if du <= 0.0 or dw <= 0.0:
         return 0.0
-    bvh = BVHTree.FromBMesh(bm)
-    scale = max(x1 - x0, y1 - y0, 1e-9)
-    start_z = z0 - 0.01 * scale
+    bvh = bvh if bvh is not None else BVHTree.FromBMesh(bm)
+    scale = max(maxs[k] - mins[k] for k in range(3)) or 1e-9
+    start = mins[axis] - 0.01 * scale
     eps = 1e-7 * scale
-    up = Vector((0.0, 0.0, 1.0))
+    direction = Vector((0.0, 0.0, 0.0))
+    direction[axis] = 1.0
     total = 0.0
     for i in range(grid):
-        x = x0 + (i + _WINDING_JITTER[0]) * dx
+        cu = mins[u] + (i + _WINDING_JITTER[0]) * du
         for j in range(grid):
-            origin = Vector((x, y0 + (j + _WINDING_JITTER[1]) * dy, start_z))
+            origin = Vector((0.0, 0.0, 0.0))
+            origin[u], origin[w], origin[axis] = cu, mins[w] + (j + _WINDING_JITTER[1]) * dw, start
             winding, inside_from, length = 0, None, 0.0
-            last_z, last_sign = None, 0
+            last_t, last_sign = None, 0
             for _ in range(100000):
-                hit, normal, _index, _dist = bvh.ray_cast(origin, up)
+                hit, normal, _index, _dist = bvh.ray_cast(origin, direction)
                 if hit is None:
                     break
-                sign = -1 if normal.z > 0.0 else 1      # entering a solid: normal against the ray
+                t = hit[axis]
+                sign = -1 if normal[axis] > 0.0 else 1      # entering a solid: normal against the ray
                 # The same crossing reported twice (ray through a shared edge or vertex)
-                if not (last_z is not None and sign == last_sign and hit.z - last_z < 10.0 * eps):
+                if not (last_t is not None and sign == last_sign and t - last_t < 10.0 * eps):
                     before = winding
                     winding += sign
                     if before <= 0 < winding:
-                        inside_from = hit.z
+                        inside_from = t
                     elif winding <= 0 < before and inside_from is not None:
-                        length += hit.z - inside_from
+                        length += t - inside_from
                         inside_from = None
-                    last_z, last_sign = hit.z, sign
-                origin = Vector((origin.x, origin.y, hit.z + eps))
+                    last_t, last_sign = t, sign
+                origin = origin.copy()
+                origin[axis] = t + eps
             total += length
-    return total * dx * dy
+    return total * du * dw
+
+
+def winding_volumes(bm, bounds=None, grid=WINDING_GRID):
+    """winding_volume along X, Y and Z (one BVH): a thin shell missed by one ray family is crossed
+    by the others."""
+    from mathutils.bvhtree import BVHTree
+    if not bm.faces:
+        return (0.0, 0.0, 0.0)
+    bounds = bounds if bounds is not None else bm_box(bm)
+    bvh = BVHTree.FromBMesh(bm)
+    return tuple(winding_volume(bm, grid, bounds, axis, bvh) for axis in range(3))
+
+
+def bm_box(bm):
+    """((min x, y, z), (max x, y, z)) of the vertices."""
+    xs = [v.co.x for v in bm.verts]
+    ys = [v.co.y for v in bm.verts]
+    zs = [v.co.z for v in bm.verts]
+    return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
 
 
 def bm_bounds(bm):

@@ -61,6 +61,23 @@ def _monkey_bm(levels):
     return bm
 
 
+def fake_object_mesh(bm, fake):
+    """bmesh of ``fake(target)`` for a temporary object holding ``bm`` (what unite_bm would get)."""
+    mesh = bpy.data.meshes.new("_fake")
+    bm.to_mesh(mesh)
+    obj = bpy.data.objects.new("_fake", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    try:
+        result = fake(obj)
+        out = bmesh.new()
+        out.from_mesh(result)
+        bpy.data.meshes.remove(result)
+        return out
+    finally:
+        bpy.data.objects.remove(obj)
+        bpy.data.meshes.remove(mesh)
+
+
 def run(ctx):
     lib.set_scene_mm()
     boolean = ctx.module("core.boolean")
@@ -94,7 +111,7 @@ def run(ctx):
         after = meshlib.bm_volume(united)
         tri = bm.copy()
         bmesh.ops.triangulate(tri, faces=tri.faces[:])   # unite_bm works on triangles (n-gon volumes)
-        bounds = meshlib.bm_bounds(tri)
+        bounds = meshlib.bm_box(tri)
         ray_in = meshlib.winding_volume(tri, bounds=bounds)
         ray_out = meshlib.winding_volume(united, bounds=bounds)
         tri.free()
@@ -132,10 +149,17 @@ def run(ctx):
         """Crossing cylinder + box (united into one shell) and a separate cube (stays its own shell)."""
         return _bm_from_parts(_cyl(8.0, 50.0, (0, 0, 0)), _cube(30.0), _cube(12.0, offset=(60, 0, 0)))
 
+    def with_plate():
+        """Crossing solids (united into one shell) + a separate 0.3 mm plate, thinner than the ray spacing."""
+        return _bm_from_parts(_cyl(8.0, 50.0, (0, 0, 0)), _cube(30.0),
+                              lambda bm: bmesh.ops.create_cube(bm, size=1.0, matrix=Matrix.Translation((60.17, 0, 0))
+                                                               @ Matrix.Diagonal((0.3, 30.0, 30.0, 1.0))))
+
     injections = {
         "shrink_3pct": (shrunk(0.99), lambda: _monkey_bm(1)),
         "shrink_1pct": (shrunk(0.9967), lambda: _monkey_bm(1)),
         "dropped_shell": (drop_smallest_shell, two_groups),
+        "dropped_thin_plate": (drop_smallest_shell, with_plate),
     }
     try:
         for name, (fake, make) in injections.items():
@@ -144,6 +168,19 @@ def run(ctx):
             united, why = boolean.unite_bm(bm)
             bm.free()
             assert united is None, f"{name}: lossy union accepted"
+            if name == "dropped_thin_plate":
+                # The plate slips between the Z rays: only the X rays see it (why all three axes are used)
+                ref = make()
+                tri = ref.copy()
+                bmesh.ops.triangulate(tri, faces=tri.faces[:])
+                lost = fake_object_mesh(tri, fake)
+                box = meshlib.bm_box(tri)
+                vin, vout = meshlib.winding_volumes(tri, box), meshlib.winding_volumes(lost, box)
+                rel = [abs(a - b) / a for a, b in zip(vin, vout)]
+                assert rel[2] < boolean.UNION_TOLERANCE < rel[0], rel
+                ctx.metric("thin_plate_rel_loss_xyz", [round(r, 5) for r in rel])
+                for bm_ in (ref, tri, lost):
+                    bm_.free()
             assert "changed the enclosed volume" in why, why
             ctx.metric(name, why)
 

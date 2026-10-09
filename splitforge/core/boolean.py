@@ -244,13 +244,14 @@ def unite_bm(bm, name=TARGET_NAME):
             # Lower bound (defect D16): the result must enclose what the shells enclose together. The
             # winding-number ray integral of the input counts each overlap once, independent of the solver;
             # both are sampled on the same rays, so a lost shell or a shrunk result shows up.
-            bounds = meshlib.bm_bounds(bm)
-            expected = meshlib.winding_volume(bm, bounds=bounds)
-            got = meshlib.winding_volume(out, bounds=bounds)
-            if abs(got - expected) > UNION_TOLERANCE * expected:
-                out.free()
-                return None, (f"uniting the shells changed the enclosed volume ({expected:.6g} -> {got:.6g}, "
-                              f"exact {before:.6g} -> {after:.6g})")
+            # Rays along all three axes: a thin shell (thinner than the ray spacing) lost by the union
+            # slips between the rays of one family but is crossed by the others.
+            bounds = meshlib.bm_box(bm)
+            for expected, got in zip(meshlib.winding_volumes(bm, bounds), meshlib.winding_volumes(out, bounds)):
+                if abs(got - expected) > UNION_TOLERANCE * expected:
+                    out.free()
+                    return None, (f"uniting the shells changed the enclosed volume ({expected:.6g} -> {got:.6g}, "
+                                  f"exact {before:.6g} -> {after:.6g})")
             return out, ""
         finally:
             bpy.data.meshes.remove(united)
