@@ -6,7 +6,7 @@
 
 Nothing here creates Blender data-blocks; every function works on ``bmesh``
 objects owned by the caller. The capping logic is the legacy
-``cap_single_object_hollow_style`` (ops_split.py) moved here without edit mode
+``cap_single_object_hollow_style`` (ops_split.py, removed in Phase 3) moved here without edit mode
 and without the world-axis assumption: loops are found on the actual cut plane
 and nested in the plane's own 2D basis, so any plane normal works.
 """

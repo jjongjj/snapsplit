@@ -3,9 +3,9 @@ Copyright (C) 2026 Christoph Medicus
 https://dev.betakontext.de
 dev@betakontext.de
 
-This file is part of SnapSplit
+This file is part of SplitForge, a fork of SnapSplit by Christoph Medicus.
 
-SnapSplit is free software; you can redistribute it and/or
+SplitForge is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
 as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
@@ -22,8 +22,8 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 # prefs.py
 
 import bpy
+from bpy.props import BoolProperty
 from bpy.types import AddonPreferences
-from bpy.props import StringProperty, BoolProperty, FloatProperty
 
 from .core import log
 
@@ -32,20 +32,11 @@ def _update_debug_log(self, context):
     """Apply the debug log toggle immediately."""
     log.set_debug(self.debug_log)
 
-class SNAPADDON_Preferences(AddonPreferences):
-    """Add-on preferences for SnapSplit."""
-    bl_idname = __package__  # "snapsplit"
 
-    default_profile: StringProperty(
-        name="Default Profile",
-        default="PLA",
-        description="Default material/printer profile",
-    )
-    create_export_collection: BoolProperty(
-        name="Create export collection",
-        default=True,
-        description="Create a collection for parts ready to export",
-    )
+class SPLITFORGE_AddonPreferences(AddonPreferences):
+    """Add-on preferences."""
+    bl_idname = __package__
+
     debug_log: BoolProperty(
         name="Debug log",
         default=False,
@@ -54,19 +45,18 @@ class SNAPADDON_Preferences(AddonPreferences):
     )
 
     def draw(self, context):
-        """Draw the add-on preferences UI."""
-        layout = self.layout
-        layout.prop(self, "default_profile")
-        layout.prop(self, "create_export_collection")
-        layout.prop(self, "debug_log")
+        self.layout.prop(self, "debug_log")
 
-classes = (SNAPADDON_Preferences,)
+
+classes = (SPLITFORGE_AddonPreferences,)
+
 
 def register():
     """Register add-on preferences."""
     for c in classes:
         bpy.utils.register_class(c)
     log.sync_from_preferences()
+
 
 def unregister():
     """Unregister add-on preferences."""

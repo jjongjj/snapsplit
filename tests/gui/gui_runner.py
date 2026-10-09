@@ -16,24 +16,18 @@ Units follow the standard 3D-print setup (Metric, Millimeters, Unit Scale 0.001,
 1 BU = 1 mm in Blender and in the add-on, see docs/MANUAL_QA.md): the cube is 40 BU = 40 mm.
 
 Scenarios
-    qa1_preview_color  QA-1: split preview planes are orange in Solid view
-                       (screenshot pixel check against preview off), no orphan meshes
-    qa2_adjust         QA-2: mouse drag moves offset + plane; LMB and Enter confirm
-                       (offset kept, modal ended); Esc cancels and cleans up
-    qa3_connectors     QA-3: click placement on a Z-split cube: preview follows the cursor,
-                       LMB places at the cursor on the seam (pin side +, socket side -),
-                       S swaps pin/socket, RMB cancels; both parts manifold
-    qa4_freehand       QA-4: LMB stroke across a filled Suzanne (front view), Shift-release
-                       axis snap, Enter -> 2 manifold parts with the original volume;
-                       Esc exits without changes; file load -> cancel()
-    adjust_undo_wheel  ed.undo/redo while Adjust Split Axis runs, wheel events write
-                       the offset (crashed with EXCEPTION_ACCESS_VIOLATION before
-                       the undo-safety fix)
-    conn_undo          ed.undo/redo while Place Connectors (click) runs; the preview is
-                       gone after undo, rebuilt on the next mouse move, cleaned up on Esc
-    load_adjust        file load while Adjust Split Axis runs -> cancel() ran (report
-                       printed, X-Ray released)
-    load_conn          file load while Place Connectors (click) runs -> cancel() ran
+    p1_adjust_plane    QA-5: cut plane overlay, splitforge.cut_adjust_plane drag/wheel/X/LMB/Esc,
+                       real Ctrl+Z / Ctrl+Shift+Z, undo during the modal, file load -> cancel()
+    p1_panel           QA-6: sidebar buttons clicked for real (add, undo, toggle, remove,
+                       Distribute, Build, Export, Clear)
+    p2_stroke          QA-7: stroke cut drawn with LMB, ribbon preview, Enter, undo/redo, modal
+                       Build, Esc/RMB, Shift snap, Redraw, file load -> cancel()
+    p2_build_progress  QA-8: modal Build progress on a 130k-face Suzanne, Esc mid-build
+    p3_connector_click QA-9: splitforge.connector_add_click: preview follows the cursor, LMB
+                       places at the cursor, S flips the pin side, real Ctrl+Z / Ctrl+Shift+Z
+                       one connector per step (during and after the modal), Build, file load
+    p3_connector_types QA-10: one connector of every type on a bar, built and pulled apart
+                       (screenshots of the pins and sockets)
 """
 
 import argparse
@@ -47,6 +41,7 @@ import traceback
 import bmesh
 import bpy
 from bpy_extras import view3d_utils
+import mathutils
 from mathutils import Euler, Vector
 
 REPO_NAME = "splitforge_gui_test"
@@ -247,22 +242,6 @@ def set_shading_solid(overlays=False):
 STATE = {"shots": {}}
 
 
-def preview_objects():
-    planes = mod("ops_split").PREVIEW_PLANE_PREFIX
-    return [o.name for o in bpy.data.objects
-            if o.name.startswith(planes) or o.name.startswith("SnapSplit_Preview")]
-
-
-def orphan_preview_meshes():
-    planes = mod("ops_split").PREVIEW_PLANE_PREFIX
-    return [m.name for m in bpy.data.meshes
-            if m.users == 0 and (m.name.startswith(planes) or m.name.startswith("SnapSplit_Preview"))]
-
-
-def xray_reasons():
-    return sorted(r for s in mod("utils")._XRAY_STATES.values() for r in s["reasons"])
-
-
 def volume(obj):
     bm = bmesh.new()
     try:
@@ -313,43 +292,12 @@ def setup_cube(overlays=False):
         setup_scene_mm()
         bpy.ops.mesh.primitive_cube_add('EXEC_DEFAULT', True, size=40.0)
         bpy.context.active_object.name = "GUI_Cube"
-        props = bpy.context.scene.snapsplit
-        props.split_axis = 'Z'
-        props.parts_count = 2
-        props.split_offset_mm = 0.0
     set_shading_solid(overlays)
-
-
-def setup_cube_overlays():
-    setup_cube(overlays=True)
-
-
-def split_into_parts():
-    with override():
-        cube = bpy.data.objects["GUI_Cube"]
-        bpy.context.view_layer.objects.active = cube
-        cube.select_set(True)
-        bpy.context.scene.snapsplit.connector_type = 'CYL_PIN'
-        bpy.ops.snapsplit.planar_split('EXEC_DEFAULT', True)
-        parts = [o for o in bpy.context.selected_objects if o.type == 'MESH']
-        for o in parts:
-            o.select_set(True)
-        bpy.context.view_layer.objects.active = parts[0]
-    STATE["parts"] = sorted(o.name for o in parts)
-    check("two parts", len(parts) == 2, STATE["parts"])
-
-
-def push_settings_change():
-    """Two undo steps that differ only in scene.snapsplit (undo re-allocates the group)."""
-    with override():
-        bpy.ops.ed.undo_push(message="gui: base")
-        bpy.context.scene.snapsplit.parts_count = 3
-        bpy.ops.ed.undo_push(message="gui: settings")
 
 
 def invoke(idname):
     def step():
-        STATE["out_mark"] = output_mark()  # reports of this run only (see check_confirmed)
+        STATE["out_mark"] = output_mark()  # reports of this run only
         event('MOUSEMOVE', 'NOTHING', region_center())
         with override():
             group, name = idname.split(".")
@@ -369,10 +317,9 @@ def redo():
 
 
 def load_homefile():
-    STATE["xray_before_load"] = xray_reasons()
     with override():
         bpy.ops.wm.read_homefile()
-    log("read_homefile; X-Ray reasons before:", STATE["xray_before_load"])
+    log("read_homefile")
 
 
 def check_running(idname, expect=True):
@@ -381,306 +328,12 @@ def check_running(idname, expect=True):
         (idname in modal_ops()) == expect, modal_ops()))
 
 
-def check_clean(what):
-    def step():
-        check(f"{what}: modal ended", not modal_ops(), modal_ops())
-        check(f"{what}: no preview objects left", not preview_objects(), preview_objects())
-        check(f"{what}: no orphan preview meshes", not orphan_preview_meshes(), orphan_preview_meshes())
-        check(f"{what}: X-Ray released", not xray_reasons(), xray_reasons())
-    return named(f"check_clean_{what}", step)
-
-
-def check_cancel_ran(message, reason):
-    def step():
-        check(f"cancel(): X-Ray reason '{reason}' held before the load",
-              reason in STATE.get("xray_before_load", []), STATE.get("xray_before_load"))
-        check(f"cancel(): reported '{message}'", printed(message))
-    return named("check_cancel_ran", step)
-
-
-# --- QA-1: preview colour -----------------------------------------------------
-
-def qa1_select_cube():
-    cube = bpy.data.objects["GUI_Cube"]
-    bpy.context.view_layer.objects.active = cube
-    cube.select_set(True)
-
-
-def qa1_preview(on):
-    def step():
-        with override():
-            props = bpy.context.scene.snapsplit
-            props.split_axis = 'X'
-            props.parts_count = 3
-            props.show_split_preview = on
-    return named(f"preview_{on}", step)
-
-
-def qa1_check_colour():
-    off = warm_pixels(STATE["shots"]["preview_off"])
-    on = warm_pixels(STATE["shots"]["preview_on"])
-    log(f"warm pixel fraction off={off:.4f} on={on:.4f}")
-    check("preview planes are orange in Solid view (warm pixels on >> off)",
-          on > 0.01 and on > 5 * off, f"off={off:.4f} on={on:.4f}")
-    mat = bpy.data.materials.get(mod("ops_split").PREVIEW_MAT_NAME)
-    check("material diffuse_color orange", mat and mat.diffuse_color[0] > 0.9 and mat.diffuse_color[2] < 0.1,
-          tuple(mat.diffuse_color) if mat else None)
-
-
-def qa1_toggle_many():
-    with override():
-        props = bpy.context.scene.snapsplit
-        for i in range(6):
-            props.show_split_preview = True
-            props.split_offset_mm = float(i)
-            props.show_split_preview = False
-    check("no orphan preview meshes after toggles", not orphan_preview_meshes(), orphan_preview_meshes())
-
-
-# --- QA-2: Adjust Split Axis -------------------------------------------------
-
-def plane_z():
-    o = bpy.data.objects.get(mod("ops_split").PREVIEW_PLANE_PREFIX + "GUI_Cube_1")
-    return None if o is None else o.matrix_world.translation.z
-
-
-def record_adjust(tag):
-    def step():
-        STATE[tag] = (bpy.context.scene.snapsplit.split_offset_mm, plane_z())
-        log(tag, STATE[tag], modal_ops())
-    return named(f"record_{tag}", step)
-
-
-def check_drag_moved(before, after):
-    def step():
-        (o0, z0), (o1, z1) = STATE[before], STATE[after]
-        check(f"drag changed the offset ({before}->{after})", abs(o1 - o0) > 0.5, (o0, o1))
-        check(f"plane followed the offset ({after})", z1 is not None and abs(z1 - o1) < 1e-3, (o1, z1))
-        check(f"plane moved ({before}->{after})", z0 is not None and z1 is not None and abs(z1 - z0) > 0.5,
-              (z0, z1))
-    return named("check_drag_moved", step)
-
-
-def check_confirmed(tag_before):
-    def step():
-        o_before = STATE[tag_before][0]
-        o_now = bpy.context.scene.snapsplit.split_offset_mm
-        check(f"confirm kept the offset ({tag_before})", abs(o_now - o_before) < 1e-6 and o_now != 0.0,
-              (o_before, o_now))
-        check(f"confirm ended the modal ({tag_before})",
-              'SNAPSPLIT_OT_adjust_split_axis' not in modal_ops(), modal_ops())
-        check(f"reported 'Split axis adjusted.' ({tag_before})",
-              printed("Split axis adjusted.", STATE.get("out_mark", 0)))
-    return named("check_confirmed", step)
-
-
-def adjust_preview(on):
-    def step():
-        with override():
-            bpy.context.scene.snapsplit.show_split_preview = on
-            bpy.context.scene.snapsplit.split_offset_mm = 0.0
-    return named(f"adjust_preview_{on}", step)
-
-
 def drag(steps=4, dy=25):
     """One MOUSEMOVE per step, moving up from the region centre."""
     out = [move(region_center)]
     for i in range(1, steps + 1):
         out.append(move(lambda i=i: (region_center()[0], region_center()[1] + i * dy)))
     return out
-
-
-def check_orphans_zero(tag):
-    return named(f"orphans_{tag}", lambda: check(f"no orphan preview meshes ({tag})",
-                                                 not orphan_preview_meshes(), orphan_preview_meshes()))
-
-
-# --- QA-3: click connectors ----------------------------------------------------
-
-SEAM_Z = 0.0
-P1 = (-8.0, 5.0, SEAM_Z)
-P2 = (8.0, -6.0, SEAM_Z)
-
-
-def conn_record(tag):
-    def step():
-        STATE[tag] = {n: volume(bpy.data.objects[n]) for n in STATE["parts"]}
-        log(tag, STATE[tag])
-    return named(f"conn_record_{tag}", step)
-
-
-def conn_check_preview_at(point):
-    def step():
-        o = bpy.data.objects.get("SnapSplit_Preview_Conn")
-        check(f"preview exists at {point}", o is not None, preview_objects())
-        if o is None:
-            return
-        # Expected: mouse ray hits the seam plane at the target point
-        x, y = world_to_window(point)
-        origin, direction = window_ray(x, y)
-        t = (SEAM_Z - origin.z) / direction.z
-        hit = origin + direction * t
-        loc = o.matrix_world.translation
-        check(f"preview follows the cursor ({point})",
-              abs(loc.x - hit.x) < 0.5 and abs(loc.y - hit.y) < 0.5, (tuple(loc), tuple(hit)))
-        STATE.setdefault("preview_xy", []).append((loc.x, loc.y))
-    return named("conn_check_preview_at", step)
-
-
-def conn_check_preview_moved():
-    xy = STATE.get("preview_xy", [])
-    check("preview position changed with the mouse",
-          len(xy) >= 2 and math.dist(xy[-1], xy[-2]) > 5.0, xy)
-
-
-def conn_check_placed(before, after, point, expect_gainer=None):
-    def step():
-        v0, v1 = STATE[before], STATE[after]
-        delta = {n: v1[n] - v0[n] for n in v0}
-        gainer = [n for n, d in delta.items() if d > 1e-3]
-        loser = [n for n, d in delta.items() if d < -1e-3]
-        check(f"placement at {point}: pin side +, socket side -", len(gainer) == 1 and len(loser) == 1, delta)
-        if expect_gainer == "other" and gainer:
-            check("S swapped pin/socket side", gainer[0] != STATE.get("first_gainer"),
-                  (gainer[0], STATE.get("first_gainer")))
-        if gainer:
-            STATE.setdefault("first_gainer", gainer[0])
-            # Vertices of the pin side that protrude past the seam are the new pin
-            obj = bpy.data.objects[gainer[0]]
-            home = 1.0 if (obj.matrix_world @ Vector(obj.bound_box[0])).z + \
-                (obj.matrix_world @ Vector(obj.bound_box[6])).z > 0 else -1.0
-            verts = [obj.matrix_world @ v.co for v in obj.data.vertices]
-            pin = [v for v in verts if v.z * home < -1e-3]
-            near = [v for v in pin if math.dist((v.x, v.y), point[:2]) < 6.0]
-            check(f"pin placed at the cursor location {point[:2]}", near,
-                  f"{len(pin)} protruding verts, {len(near)} near the target")
-        for n in STATE["parts"]:
-            check(f"{n} manifold after placement", is_manifold(bpy.data.objects[n]))
-    return named("conn_check_placed", step)
-
-
-# --- QA-4: freehand ------------------------------------------------------------
-
-def setup_suzanne():
-    with override():
-        for o in list(bpy.data.objects):
-            bpy.data.objects.remove(o)
-        setup_scene_mm()
-        bpy.ops.mesh.primitive_monkey_add('EXEC_DEFAULT', True, size=40.0)
-        obj = bpy.context.active_object
-        obj.name = "GUI_Suzanne"
-        # Keep only the head shell: Freehand Cut (stage B3) refuses separate shells the
-        # cut does not cross, and Suzanne's eyes are separate shells.
-        bm = bmesh.new()
-        bm.from_mesh(obj.data)
-        islands, seen = [], set()
-        for v in bm.verts:
-            if v.index in seen:
-                continue
-            stack, island = [v], []
-            seen.add(v.index)
-            while stack:
-                cur = stack.pop()
-                island.append(cur)
-                for e in cur.link_edges:
-                    other = e.other_vert(cur)
-                    if other.index not in seen:
-                        seen.add(other.index)
-                        stack.append(other)
-            islands.append(island)
-        islands.sort(key=len)
-        bmesh.ops.delete(bm, geom=[v for island in islands[:-1] for v in island], context='VERTS')
-        bm.to_mesh(obj.data)
-        bm.free()
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.mesh.fill_holes(sides=0)
-        bpy.ops.mesh.normals_make_consistent(inside=False)
-        bpy.ops.object.mode_set(mode='OBJECT')
-    set_shading_solid()
-    STATE["suzanne_volume"] = volume(obj)
-    STATE["objects_before"] = sorted(o.name for o in bpy.data.objects)
-    check("Suzanne manifold", is_manifold(obj))
-
-
-def fh_point(fx, fz):
-    """Window position of a point on the Suzanne front plane (fractions of 40 BU)."""
-    return lambda: world_to_window((fx * 20.0, -30.0, fz * 20.0))
-
-
-def fh_stroke(shift_release):
-    # Slightly slanted line through the muzzle (below eyes and ears); Shift snaps it level
-    z0, z1 = -0.30, -0.42
-    steps = [key('LEFTMOUSE', 'PRESS', fh_point(-1.2, z0))]
-    n = 10
-    for i in range(1, n + 1):
-        f = i / n
-        steps.append(move(fh_point(-1.2 + 2.4 * f, z0 + (z1 - z0) * f)))
-    steps.append(key('LEFTMOUSE', 'RELEASE', fh_point(1.2, z1), shift=shift_release))
-    return steps
-
-
-def fh_active():
-    ops = mod("ops_freehand")._ACTIVE_OPERATORS
-    return ops[0] if ops else None
-
-
-def fh_check_preview(expect_snap=True):
-    op = fh_active()
-    check("freehand preview built", op is not None and op._selected_count > 0,
-          None if op is None else op._selected_count)
-    if expect_snap and op is not None and op._plane_normal is not None:
-        n = op._plane_normal
-        check("Shift-release snapped the plane to an axis", max(abs(n.x), abs(n.y), abs(n.z)) > 0.999,
-              tuple(n))
-
-
-def fh_check_committed():
-    parts = [o for o in bpy.data.objects if o.name.startswith("GUI_Suzanne_Freehand_")]
-    check("Enter committed 2 parts", len(parts) == 2, [o.name for o in parts])
-    for o in parts:
-        check(f"{o.name} manifold", is_manifold(o))
-    total = sum(volume(o) for o in parts)
-    v0 = STATE["suzanne_volume"]
-    check("part volumes sum to the original", abs(total - v0) <= 0.01 * v0, (total, v0))
-    check("freehand modal ended", fh_active() is None and not modal_ops(), modal_ops())
-
-
-def fh_check_unchanged(what):
-    def step():
-        check(f"{what}: objects unchanged", sorted(o.name for o in bpy.data.objects) == STATE["objects_before"],
-              sorted(o.name for o in bpy.data.objects))
-        check(f"{what}: freehand modal ended", fh_active() is None and not modal_ops(), modal_ops())
-    return named(f"fh_unchanged_{what}", step)
-
-
-def fh_load_check():
-    check("file load: freehand cancel() cleaned up", fh_active() is None and not modal_ops(),
-          (fh_active(), modal_ops()))
-
-
-# --- undo / file-load scenarios ---------------------------------------------------
-
-OFFSETS = []
-
-
-def record_offset():
-    OFFSETS.append(bpy.context.scene.snapsplit.split_offset_mm)
-    log("offset", OFFSETS[-1], modal_ops())
-
-
-def check_offsets_followed_wheel():
-    check("live offset followed the wheel", len(set(OFFSETS)) > 1 and any(OFFSETS), OFFSETS)
-
-
-def conn_undo_step():
-    undo()
-    check("preview gone right after undo", not preview_objects(), preview_objects())
-
-
-def check_connectors_preview_rebuilt():
-    check("connectors running", 'SNAPSPLIT_OT_place_connectors_click' in modal_ops(), modal_ops())
-    check("preview rebuilt after undo", preview_objects(), preview_objects())
 
 
 def pos(dx=0, dy=0):
@@ -1151,58 +804,128 @@ def p2_add_plane_and_connectors():
           all(len(c.connectors) > 0 for c in monkey_cuts()), [len(c.connectors) for c in monkey_cuts()])
 
 
+# --- P3: connectors (click placement, all types) ------------------------------------------
+
+CLICK_OP = "SPLITFORGE_OT_connector_add_click"
+CLICKS = [(10.0, -4.0, 0.0), (-8.0, 6.0, 0.0), (2.0, 12.0, 0.0)]
+
+
+def click_state():
+    return mod("ops.ops_connector_click")
+
+
+def p3_setup():
+    """40 mm cube with a Z cut (gap 0.4), new connectors CYL_PIN 5 x 10, top view, overlays on."""
+    with override():
+        for o in list(bpy.data.objects):
+            bpy.data.objects.remove(o)
+        setup_scene_mm()
+        bpy.ops.mesh.primitive_cube_add('EXEC_DEFAULT', True, size=40.0)
+        cube = bpy.context.active_object
+        cube.name = "GUI_Cube"
+        cube.select_set(True)
+        sf().show_overlay = True
+        t = sf().new_connector
+        t.kind, t.width_mm, t.length_mm, t.pin_side = 'CYL_PIN', 5.0, 10.0, 'A'
+        bpy.ops.splitforge.stack_add_plane('EXEC_DEFAULT', True, axis='Z')
+        sf_cuts()[0].gap_mm = 0.4
+        bpy.ops.ed.undo_push(message="gui: p3 setup")
+    set_shading_solid(overlays=True)
+    STATE["objects_before"] = sorted(o.name for o in bpy.data.objects)
+    STATE["collections_before"] = sorted(c.name for c in bpy.data.collections)
+
+
+def p3_conns():
+    return sf_cuts()[0].connectors
+
+
+def p3_check_preview(at):
+    def step():
+        st = click_state()
+        lines = st._PREVIEW["lines"]
+        check("click modal running", CLICK_OP in modal_ops(), modal_ops())
+        center = sum((Vector(p) for p in lines), Vector()) / max(1, len(lines))
+        check(f"preview drawn at the cursor on the seam {at[:2]}", lines and (center - Vector(at)).length < 0.6,
+              (len(lines), tuple(round(c, 2) for c in center)))
+        check("preview green inside the object", st._PREVIEW["color"] == st.FIT_COLOR, st._PREVIEW["color"])
+        check("no preview objects or collections created",
+              sorted(o.name for o in bpy.data.objects) == STATE["objects_before"]
+              and sorted(c.name for c in bpy.data.collections) == STATE["collections_before"],
+              (sorted(o.name for o in bpy.data.objects), sorted(c.name for c in bpy.data.collections)))
+    return named("p3_check_preview", step)
+
+
+def p3_check_count(n, what):
+    return named(f"p3_count_{n}", lambda: check(f"{what}: {n} connector(s)", len(p3_conns()) == n,
+                                                [(round(c.u, 2), round(c.v, 2), c.pin_side) for c in p3_conns()]))
+
+
+def p3_check_placed():
+    conns = p3_conns()
+    ok = len(conns) == 3 and all(abs(c.u - x) < 0.5 and abs(c.v - y) < 0.5 for c, (x, y, _z) in zip(conns, CLICKS))
+    check("3 clicks placed 3 connectors at the clicked seam points", ok,
+          [(round(c.u, 2), round(c.v, 2)) for c in conns])
+    check("S flipped the pin side of the third", [c.pin_side for c in conns] == ['A', 'A', 'B'],
+          [c.pin_side for c in conns])
+
+
+def p3_check_ended():
+    st = click_state()
+    check("click modal ended, handler removed", CLICK_OP not in modal_ops() and st._HANDLE is None
+          and not st._RUNNING, (modal_ops(), st._HANDLE, st._RUNNING))
+
+
+def p3_build_and_lift(name, lift=14.0):
+    def step():
+        with override():
+            src = bpy.data.objects[name]
+            bpy.context.view_layer.objects.active = src
+            src.hide_set(False)
+            res = mod("cuts.build").build(bpy.context, src)
+        parts = [bpy.data.objects[n] for n in res.parts]
+        check(f"{name}: Build without warnings", not res.warnings, res.warnings)
+        for p in parts:
+            check(f"{p.name} manifold", is_manifold(p))
+            if p.name.endswith("_A"):
+                p.location.z += lift
+        STATE.setdefault("built", {})[name] = [p.name for p in parts]
+    return named(f"p3_build_{name}", step)
+
+
+def p3_setup_types():
+    """A 180 x 30 x 30 bar, Z cut, one connector of every type along it; dowels lie beside it."""
+    with override():
+        for o in list(bpy.data.objects):
+            bpy.data.objects.remove(o)
+        setup_scene_mm()
+        bpy.ops.mesh.primitive_cube_add('EXEC_DEFAULT', True, size=1.0)
+        bar = bpy.context.active_object
+        bar.name = "GUI_Bar"
+        bar.data.transform(mathutils.Matrix.Diagonal((180.0, 30.0, 30.0, 1.0)))
+        knob = bpy.data.objects.new("GUI_Knob", bpy.data.meshes.new("GUI_Knob"))
+        bm = bmesh.new()
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=6, radius1=1.0, radius2=0.6, depth=2.0)
+        bm.to_mesh(knob.data)
+        bm.free()
+        bpy.context.scene.collection.objects.link(knob)
+        knob.location = (0.0, 60.0, 0.0)
+        bpy.context.view_layer.objects.active = bar
+        bar.select_set(True)
+        sf().show_overlay = True
+        bpy.ops.splitforge.stack_add_plane('EXEC_DEFAULT', True, axis='Z')
+        cut = bar.splitforge_stack.cuts[0]
+        cut.gap_mm = 0.4
+        kinds = ['CYL_PIN', 'RECT_TENON', 'DOVETAIL', 'SNAP_PIN', 'SNAP_TENON', 'SNAP_DOVETAIL', 'CUSTOM', 'DOWEL']
+        for i, kind in enumerate(kinds):
+            t = sf().new_connector
+            t.kind, t.width_mm, t.height_mm, t.length_mm = kind, 8.0, 6.0, 14.0
+            t.taper_pct, t.chamfer_mm, t.custom_object = 30.0, 0.6 if kind in ('CYL_PIN', 'DOWEL') else 0.0, knob
+            bpy.ops.splitforge.connector_add('EXEC_DEFAULT', True, u=-77.0 + 22.0 * i, v=0.0)
+        bpy.ops.ed.undo_push(message="gui: types")
+    set_shading_solid(overlays=True)
+
+
 SCENARIOS = {
-    "qa1_preview_color": [
-        setup_cube, qa1_select_cube, set_oblique_view(1.3), wait, screenshot("preview_off"),
-        qa1_preview(True), wait, wait, screenshot("preview_on"), qa1_check_colour,
-        qa1_preview(False), wait, qa1_toggle_many, check_clean("preview off"),
-    ],
-    "qa2_adjust": (
-        [setup_cube, qa1_select_cube, set_oblique_view(1.3), adjust_preview(True), wait]
-        # 1) drag + LMB confirm
-        + [invoke("snapsplit.adjust_split_axis"), record_adjust("start")] + drag()
-        + [wait, record_adjust("dragged"), check_drag_moved("start", "dragged"), screenshot("dragged"),
-           check_orphans_zero("drag, preview on")]
-        + click('LEFTMOUSE', pos(0, 100)) + [wait, check_confirmed("dragged"), screenshot("confirmed_lmb")]
-        # 2) drag + Enter confirm, preview OFF (no delete/recreate churn)
-        + [adjust_preview(False), invoke("snapsplit.adjust_split_axis"), record_adjust("start2")]
-        + drag(steps=3, dy=-30)
-        + [wait, record_adjust("dragged2"), check_drag_moved("start2", "dragged2"),
-           check_orphans_zero("drag, preview off")]
-        + [key('RET'), wait, check_confirmed("dragged2"), check_clean("after Enter, preview off")]
-        # 3) Esc cancels
-        + [invoke("snapsplit.adjust_split_axis")] + drag(steps=2)
-        + [wait, key('ESC'), wait, check_clean("after Esc"),
-           named("esc_report", lambda: check("reported 'Adjust split axis cancelled.'",
-                                             printed("Adjust split axis cancelled.", STATE["out_mark"])))]
-    ),
-    "qa3_connectors": (
-        [setup_cube_overlays, split_into_parts, set_view('TOP', 1.4), wait, conn_record("v0"),
-         invoke("snapsplit.place_connectors_click"),
-         move(lambda: world_to_window(P2)), wait, conn_check_preview_at(P2),
-         move(lambda: world_to_window(P1)), wait, conn_check_preview_at(P1), conn_check_preview_moved,
-         screenshot("preview_follows")]
-        + click('LEFTMOUSE', lambda: world_to_window(P1))
-        + [wait, conn_record("v1"), conn_check_placed("v0", "v1", P1), screenshot("placed")]
-        + [key('S'), wait, move(lambda: world_to_window(P2)), wait]
-        + click('LEFTMOUSE', lambda: world_to_window(P2))
-        + [wait, conn_record("v2"), conn_check_placed("v1", "v2", P2, expect_gainer="other"),
-           screenshot("placed_swapped")]
-        + click('RIGHTMOUSE') + [wait, check_clean("after RMB")]
-    ),
-    "qa4_freehand": (
-        [setup_suzanne, set_view('FRONT', 1.2), wait,
-         invoke("snapsplit.freehand_cut"), wait]
-        + fh_stroke(shift_release=True)
-        + [wait, fh_check_preview, screenshot("stroke_preview"), key('RET'), wait, wait,
-           fh_check_committed, screenshot("committed")]
-        # Esc exits without changes (fresh Suzanne)
-        + [setup_suzanne, wait, invoke("snapsplit.freehand_cut"), wait] + fh_stroke(shift_release=False)
-        + [wait, named("fh_preview_no_snap", lambda: fh_check_preview(False)), key('ESC'), wait,
-           fh_check_unchanged("Esc")]
-        # File load while drawing mode is active -> cancel()
-        + [invoke("snapsplit.freehand_cut"), wait, load_homefile, wait, fh_load_check]
-    ),
     "p1_adjust_plane": (
         [sf_setup(1), set_oblique_view(1.6), sf_overlay(False), wait, screenshot("overlay_off"),
          sf_overlay(True), wait, wait, screenshot("overlay_on"), sf_check_overlay_colour, sf_record("start")]
@@ -1264,7 +987,8 @@ SCENARIOS = {
         + press_button(BTN["add_x"]) + press_button(BTN["distribute"])
         + [sf_check("Distribute added 2 connectors per seam region (Z splits the X seam: 4)",
                     lambda: (len(sf_cuts()[1].connectors) == 4, len(sf_cuts()[1].connectors)))]
-        # The connector list moved the Build box down: find the buttons again
+        # The connector list and the new-connector box moved the Build box down: scroll, find the buttons again
+        + [sf_scroll_sidebar, wait] * 8
         + sf_scan() + [sf_check_buttons(["build"])]
         + press_button(BTN["build"]) + [wait, sf_check_build, screenshot("panel_built")]
         # The panel is now taller than the sidebar: scroll it with the wheel, find the buttons again
@@ -1341,27 +1065,50 @@ SCENARIOS = {
            invoke("splitforge.build"), p2_when_mid_build(key('ESC'), "Esc"), wait, p2_wait_build(), wait,
            p2_check_cancelled_build, sf_no_overlay_errors]
     ),
-    "adjust_undo_wheel": (
-        [setup_cube, push_settings_change, invoke("snapsplit.adjust_split_axis"),
-         key('WHEELUPMOUSE'), wait, record_offset]
-        + [undo, key('WHEELUPMOUSE'), key('WHEELUPMOUSE'), wait, record_offset,
-           redo, key('WHEELDOWNMOUSE'), wait, record_offset] * 6
-        + [check_running('SNAPSPLIT_OT_adjust_split_axis'), check_offsets_followed_wheel,
-           key('ESC'), wait, check_clean("adjust")]
+    "p3_connector_click": (
+        [p3_setup, set_view('TOP', 1.5), wait, screenshot("before"),
+         invoke("splitforge.connector_add_click"), move(lambda: world_to_window(CLICKS[0])), wait,
+         p3_check_preview(CLICKS[0]), screenshot("preview")]
+        + click('LEFTMOUSE', lambda: world_to_window(CLICKS[0])) + [wait, p3_check_count(1, "first click")]
+        + [move(lambda: world_to_window(CLICKS[1])), wait] + click('LEFTMOUSE', lambda: world_to_window(CLICKS[1]))
+        + [wait, key('S'), wait, move(lambda: world_to_window(CLICKS[2])), wait]
+        + click('LEFTMOUSE', lambda: world_to_window(CLICKS[2]))
+        + [wait, p3_check_placed, screenshot("placed")]
+        # A click outside the object places nothing
+        + click('LEFTMOUSE', lambda: world_to_window((30.0, 0.0, 0.0))) + [wait, p3_check_count(3, "outside click")]
+        # Real Ctrl+Z / Ctrl+Shift+Z while placing: one connector per step
+        + [ctrl_key('Z'), wait, p3_check_count(2, "Ctrl+Z"), ctrl_key('Z'), wait, p3_check_count(1, "Ctrl+Z"),
+           ctrl_key('Z'), wait, p3_check_count(0, "Ctrl+Z"),
+           ctrl_key('Z', shift=True), wait, ctrl_key('Z', shift=True), wait, ctrl_key('Z', shift=True), wait,
+           p3_check_count(3, "Ctrl+Shift+Z"), p3_check_placed, check_running(CLICK_OP)]
+        + [key('ESC'), wait, p3_check_ended]
+        # After the modal: still one undo step per click
+        + [ctrl_key('Z'), wait, p3_check_count(2, "Ctrl+Z after Esc"), ctrl_key('Z', shift=True), wait,
+           p3_check_count(3, "Ctrl+Shift+Z after Esc")]
+        # Build: pins and sockets where clicked
+        + [p3_build_and_lift("GUI_Cube", lift=22.0), set_oblique_view(1.2), sf_overlay(False), wait,
+           screenshot("built"), named("view_below_cube", lambda: setattr(
+               view3d()[1].spaces.active.region_3d, "view_rotation",
+               Euler((math.radians(105), 0.0, math.radians(25))).to_quaternion())), wait,
+           screenshot("built_pins"), sf_overlay(True)]
+        # File load while placing -> cancel()
+        + [named("show_src", lambda: (bpy.data.objects["GUI_Cube"].hide_set(False),
+                                      setattr(bpy.context.view_layer.objects, "active", bpy.data.objects["GUI_Cube"]))),
+           set_view('TOP', 1.5), invoke("splitforge.connector_add_click"), move(pos(10)), wait, load_homefile, wait,
+           p3_check_ended, sf_no_overlay_errors]
     ),
-    "conn_undo": (
-        [setup_cube, split_into_parts, set_view('TOP', 1.4), push_settings_change,
-         invoke("snapsplit.place_connectors_click"), move(pos(10)), wait]
-        + [conn_undo_step, move(pos(20)), wait, check_connectors_preview_rebuilt, key('S'),
-           redo, move(pos(-20)), wait] * 4
-        + [key('ESC'), wait, check_clean("connectors")]
+    "p3_connector_types": (
+        [p3_setup_types, set_oblique_view(1.1), wait, screenshot("records"),
+         p3_build_and_lift("GUI_Bar", lift=26.0),
+         named("types_parts", lambda: check("A, B and one dowel part", sorted(STATE["built"]["GUI_Bar"]) ==
+                                            ["GUI_Bar_A", "GUI_Bar_B", "GUI_Bar_Dowel_1"], STATE["built"]["GUI_Bar"])),
+         sf_overlay(False), wait, screenshot("built"),
+         named("view_below", lambda: setattr(view3d()[1].spaces.active.region_3d, "view_rotation",
+                                             Euler((math.radians(115), 0.0, math.radians(20))).to_quaternion())),
+         named("zoom", lambda: setattr(view3d()[1].spaces.active.region_3d, "view_distance",
+                                       view3d()[1].spaces.active.region_3d.view_distance * 0.6)),
+         wait, screenshot("pins_from_below")]
     ),
-    "load_adjust": [setup_cube, qa1_select_cube, invoke("snapsplit.adjust_split_axis"), key('WHEELUPMOUSE'),
-                    wait, load_homefile, wait, check_clean("adjust after file load"),
-                    check_cancel_ran("Adjust split axis cancelled.", "adjust_axis")],
-    "load_conn": [setup_cube, split_into_parts, invoke("snapsplit.place_connectors_click"), move(pos(10)),
-                  wait, load_homefile, wait, check_clean("connectors after file load"),
-                  check_cancel_ran("Placement cancelled.", "click_place")],
 }
 
 

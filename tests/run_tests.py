@@ -13,7 +13,7 @@ Usage:
                                 [--gui [--gui-only] [--gui-scenario NAME]...]
 
 ``--gui`` additionally runs the modal-operator scenarios in ``tests/gui/gui_runner.py``
-(QA-1..QA-4 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
+(QA-5..QA-10 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
 with simulated input; screenshots go to ``tests/_out/gui/``. Takes a few minutes;
 windows pop up and must not be touched while they run.
 
@@ -145,9 +145,8 @@ def run_blender(exe, args, timeout):
             "tmp": to_exe_path(TMP_DIR, exe)}
 
 
-GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel", "p2_stroke", "p2_build_progress",
-                 "qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
-                 "adjust_undo_wheel", "conn_undo", "load_adjust", "load_conn")
+GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel", "p2_stroke", "p2_build_progress", "p3_connector_click",
+                 "p3_connector_types")
 GUI_SHOTS_DIR = os.path.join(OUT_DIR, "gui")
 
 

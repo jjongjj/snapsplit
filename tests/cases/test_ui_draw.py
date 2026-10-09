@@ -60,8 +60,7 @@ class Layout:
             ul.draw_item(None, bpy.context, Layout(self._log), data, item, 0, active_data, active_prop, index)
 
 
-PANELS = ("SPLITFORGE_PT_main", "SPLITFORGE_PT_connectors", "SPLITFORGE_PT_build", "SPLITFORGE_PT_settings",
-          "SNAP_PT_panel")
+PANELS = ("SPLITFORGE_PT_main", "SPLITFORGE_PT_connectors", "SPLITFORGE_PT_build", "SPLITFORGE_PT_settings")
 
 
 def _draw_all(state):
@@ -103,8 +102,7 @@ def run(ctx):
     log = _draw_all("draft")
     for item in (("drawn", "SPLITFORGE_PT_connectors"), ("list", "SPLITFORGE_UL_cuts"),
                  ("list", "SPLITFORGE_UL_connectors"), ("operator", "splitforge.cut_adjust_plane"),
-                 ("operator", "splitforge.build"), ("prop", "pin_side"), ("prop", "height_mm"),
-                 ("drawn", "SNAP_PT_panel")):
+                 ("operator", "splitforge.build"), ("prop", "pin_side"), ("prop", "height_mm")):
         assert item in log, (item, log)
     fills, lines = overlay.geometry(bpy.context)
     # Cut 0 disabled (outline only), cut 1 active (fill + outline + one per connector)

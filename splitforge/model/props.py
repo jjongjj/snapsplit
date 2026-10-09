@@ -23,7 +23,6 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
 from bpy.types import PropertyGroup
 
 from ..core import naming
-from ..profiles import MATERIAL_PROFILES
 
 SCHEMA_VERSION = 3   # 2: STROKE cuts (points, direction); 3: all connector types
 
@@ -51,7 +50,15 @@ DISTRIBUTIONS = [
     ('GRID', "Grid", "Columns x rows over the seam, points outside the section are dropped"),
 ]
 
-# Material -> default socket clearance (shared with the legacy UI)
+# Material -> default socket clearance per side (mm)
+MATERIAL_PROFILES = {
+    "PLA": 0.20,
+    "PETG": 0.30,
+    "ABS": 0.25,
+    "ASA": 0.25,
+    "TPU": 0.35,
+    "SLA": 0.10,
+}
 MATERIALS = [(key, key, f"Clearance {value:.2f} mm") for key, value in MATERIAL_PROFILES.items()]
 
 def _redraw(_self, context):

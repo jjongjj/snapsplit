@@ -41,7 +41,7 @@ class Context:
         self.metrics = {}
 
     def module(self, name):
-        """Return an add-on submodule, e.g. ctx.module("ops_split")."""
+        """Return an add-on submodule, e.g. ctx.module("cuts.build")."""
         return sys.modules[f"{ADDON_MODULE}.{name}"]
 
     def metric(self, key, value):

@@ -313,6 +313,8 @@ def apply(target, operand_bm, operation, quality='AUTO', self_intersect=False, e
                     merged = united_volume(target) or before
                 reason = check_result(operation, merged, operand_volume, after, manifold, faces, expect)
             attempts.append((attempt, reason or "ok", round(time.perf_counter() - t0, 3)))
+            log.debug("boolean %s on %s: %s -> %s (%.3f s)", operation, target.name, attempt, reason or "ok",
+                      attempts[-1][2])
             if reason:
                 bpy.data.meshes.remove(new_mesh)
                 continue
