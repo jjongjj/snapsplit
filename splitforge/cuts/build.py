@@ -25,6 +25,10 @@ from ..model import stack as stack_api
 from . import plane
 
 
+# Largest spacing of the connector surface samples (connectors/fit.py)
+FIT_STEP_MM = 1.0
+
+
 class BuildError(Exception):
     pass
 
@@ -90,11 +94,18 @@ def make_spec(obj, cut, scene, label, u_mm, v_mm, rotation_deg, kind, width_mm, 
     return conn_apply.ConnectorSpec(
         label=label, matrix=placement.frame_matrix(co, n, t, u_mm * mm, v_mm * mm, rotation_deg),
         kind=kind, width=width_mm * mm, height=height_mm * mm, length=length_mm * mm,
-        clearance=clearance_mm * mm, gap=cut.gap_mm * mm, pin_positive=(pin_side == 'A'))
+        clearance=clearance_mm * mm, gap=cut.gap_mm * mm, pin_positive=(pin_side == 'A'), cut_uid=cut.uid)
 
 
 def default_clearance(settings):
     return settings.clearance_mm if settings is not None else 0.2
+
+
+def fit_planes(obj, cuts, scene):
+    """{cut uid: (co, n, gap)} in world space / BU, for connectors/fit.check."""
+    mm = units.mm_to_scene(1.0, scene)
+    return {cut.uid: (co, n, cut.gap_mm * mm) for cut, (_label, co, n, _gap, _cap)
+            in zip(cuts, cut_planes(obj, cuts, scene))}
 
 
 def connector_specs(obj, cuts, scene, settings):
@@ -201,7 +212,8 @@ def build(context, obj):
         if len(pieces) < 2:
             raise BuildError("The cuts do not intersect the object")
         pins, sockets, conn_warnings, overlapping = conn_apply.assign(
-            [p.bm for p in pieces], connector_specs(obj, cuts, scene, settings), source_bvh)
+            [p.bm for p in pieces], connector_specs(obj, cuts, scene, settings), source_bvh,
+            fit_planes(obj, cuts, scene), units.mm_to_scene(FIT_STEP_MM, scene))
         warnings += conn_warnings
 
         coll = _prepare_collection(context, obj)
