@@ -215,6 +215,7 @@ run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
 - Build는 **원본을 절대 변경하지 않는다**(복사본에서 작업). 변환 적용도 복사본에만. 사용자가 원하면 `fix_transforms`를 명시 실행.
 - depsgraph/draw 핸들러에서 데이터블록 생성·삭제 금지. 프리뷰는 gpu 오버레이(`SpaceView3D.draw_handler_add`)로만 그린다(평면 오브젝트 프리뷰 제거). 모달 중 데이터는 파이썬 객체에만 보관.
 - 핸들러·드로우 핸들러는 `unregister`에서 반드시 제거(ops_freehand의 `_ACTIVE_OPERATORS` 패턴 유지).
+- 모달·타이머·핸들러는 이벤트 사이에 bpy 구조체 참조를 보관하지 않는다(특히 `context.scene.snapsplit` 같은 ID 내부 구조체: undo/redo가 ID 프로퍼티를 재할당하면 해제된 메모리를 가리켜 크래시). 이름·숫자만 저장하고 매 이벤트 다시 조회, 대상이 사라지면 정리 후 종료, `cancel()`에서도 정리. 회귀 테스트 `tests/cases/test_modal_undo_safety.py`.
 - 재빌드 시 이전 결과 컬렉션을 통째로 교체(이름 재사용), 중간 오브젝트는 생성하지 않거나 즉시 제거.
 
 ### 4.6 UI 레이아웃 (N 패널 "SnapSplit")

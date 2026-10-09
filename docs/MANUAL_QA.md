@@ -35,6 +35,7 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 - 2단계에서 주황 평면이 마우스/휠을 따라 Z 방향으로 움직이고, Split Offset (mm) 값이 함께 바뀐다. 평면은 오브젝트 경계 밖으로 나가지 않는다.
 - 3단계 분할 결과의 절단 높이가 마지막 평면 위치와 일치하고, 두 파트 모두 단면이 막혀 있다(캡).
 - 4단계 Esc 후 정보 메시지 "Adjust split axis cancelled."가 뜨고 프리뷰 평면·X-Ray가 정리된다.
+- 모달 중 대상 오브젝트가 사라지면(스크립트 삭제·undo) 오류 없이 "Adjust split axis cancelled."로 끝난다.
 
 ## QA-3 클릭 커넥터 배치 (`snapsplit.place_connectors_click`)
 
@@ -61,6 +62,30 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 - 2단계에서 그리는 동안 스트로크 선이, 놓은 뒤에는 컷 평면 프리뷰(선택된 단면 루프)가 보인다. Shift 릴리스 시 평면이 가장 가까운 축 방향으로 스냅된다.
 - 3단계에서 스트로크 방향의 평면으로 2파트가 생성되고 단면이 막혀 있다. 이후 "Add connectors"로 경사 시임에 커넥터가 배치된다.
 - 4단계 Esc 후 헤더 텍스트·드로우 핸들러가 정리되고(뷰포트에 잔상 없음) 오브젝트 수가 실행 전과 같다.
+
+---
+
+## 스크립트(MCP·타이머)로 QA를 자동화할 때의 규칙
+
+배경: 2026-10-09 Blender 5.2.2 크래시(`EXCEPTION_ACCESS_VIOLATION`, `IDP_GetPropertyFromGroup`에서 주소 0x18 읽기,
+스택 바닥이 `py_timer_execute`). 원인은 Python이 보관한 `scene.snapsplit` 참조가 undo/redo 뒤에 해제된 메모리를 가리킨 것이다.
+memfile undo/redo는 Scene ID 주소는 그대로 두고 ID 프로퍼티(= `scene.snapsplit` PropertyGroup)만 새로 읽어 들이므로,
+Blender가 이 중첩 참조를 무효화하지 못하고 다음 읽기/쓰기가 use-after-free가 된다(Object 같은 ID 자체는 `ReferenceError`로 막힌다).
+SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온이 실행한 QA 스크립트였다(`--enable-event-simulate` GUI 재현에서
+같은 패턴으로 동일한 예외 주소·스택이 재현됨). 애드온의 모달(`adjust_split_axis`, `place_connectors_click`)도 같은 패턴을 갖고 있어 함께 수정했다.
+
+규칙:
+- **bpy 참조를 호출 사이에 보관하지 않는다.** `bpy.app.driver_namespace`, 모듈 전역, 클로저(`check_is_finished` 포함)에
+  `scene.snapsplit`, `obj.modifiers[...]`, `mesh.vertices`, Area/Region/Space 등을 넣지 않는다. 이름(`obj.name`)·숫자만 저장하고
+  매번 `bpy.context.scene.snapsplit`, `bpy.data.objects.get(name)`으로 다시 찾는다.
+- **한 스크립트 안에서도** `bpy.ops.ed.undo()/redo()`, `wm.read_homefile/open_mainfile/revert_mainfile`, 애드온 disable/enable 뒤에는
+  그 전에 얻은 참조(`p = scene.snapsplit` 등)를 버리고 다시 얻는다. 예: `p = bpy.context.scene.snapsplit; bpy.ops.ed.undo(); p.split_offset_mm` 금지.
+- `event_timer_add`로 만든 타이머는 같은 스크립트(또는 `try/finally`)에서 `event_timer_remove`한다. 덮어쓰기(`driver_namespace["qa_timer"] = ...`
+  재실행)로 이전 타이머를 잃어버리지 않는다.
+- 모달을 스크립트로 띄운 채 undo를 실행하는 시나리오는 의도한 테스트일 때만 쓴다(실제 GUI에서는 모달이 Ctrl+Z를 가로챈다).
+  회귀 테스트는 `tests/cases/test_modal_undo_safety.py`.
+- 사용자가 쓰는 Blender(MCP 서버 호스트)로 크래시 재현을 하지 않는다. 별도 인스턴스를 `--factory-startup`으로 띄우고,
+  `TEMP`/`TMP`를 별도 폴더로 지정해 `%TEMP%\blender.crash.txt`·`quit.blend`를 덮어쓰지 않게 한다.
 
 ---
 

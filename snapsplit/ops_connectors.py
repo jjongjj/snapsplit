@@ -3439,6 +3439,34 @@ class SNAP_OT_place_connectors_click(Operator):
     bl_description = "Interactively place a connector (pin/tenon/dovetail) by clicking on the seam plane between two parts."
     bl_options = {'REGISTER', 'UNDO', 'BLOCKING'}
 
+    # Undo safety: no bpy struct references are kept between modal events. An undo/redo
+    # step re-reads the Scene's ID properties, so a cached `context.scene.snapsplit`
+    # would point to freed memory (reading it crashes Blender). The scene settings are
+    # looked up on every access and the two parts are stored by name.
+
+    @property
+    def props(self):
+        """Current scene settings (looked up fresh, never cached)."""
+        return bpy.context.scene.snapsplit
+
+    @property
+    def a(self):
+        """Part A (socket side), resolved by name; None if it no longer exists."""
+        return bpy.data.objects.get(getattr(self, "_a_name", ""))
+
+    @a.setter
+    def a(self, obj):
+        self._a_name = obj.name if obj is not None else ""
+
+    @property
+    def b(self):
+        """Part B (pin side), resolved by name; None if it no longer exists."""
+        return bpy.data.objects.get(getattr(self, "_b_name", ""))
+
+    @b.setter
+    def b(self, obj):
+        self._b_name = obj.name if obj is not None else ""
+
     def invoke(self, context, event):
         """Start modal placement with live preview for two selected mesh parts."""
         props = context.scene.snapsplit
@@ -3447,8 +3475,6 @@ class SNAP_OT_place_connectors_click(Operator):
             report_user(self, 'ERROR',
                         'Select exactly 2 adjacent split parts.')
             return {'CANCELLED'}
-
-        self.props = props
 
         # Detect seam axis, roles (A = socket, B = pin) and insertion direction from geometry
         resolved = _resolve_pair(sel[0], sel[1])
@@ -3859,9 +3885,18 @@ class SNAP_OT_place_connectors_click(Operator):
         if cancelled:
             report_user(self, 'INFO', 'Placement cancelled.')
 
+    def cancel(self, context):
+        """Blender-driven cancellation (file load, window closed): clean up like Esc."""
+        self.finish(context, cancelled=True)
+
     def modal(self, context, event):
         """Handle mouse movement for preview updates and left-click for placement."""
         try:
+            # The parts are looked up by name; end cleanly if one vanished (e.g. undo).
+            if self.a is None or self.b is None:
+                self.finish(context, cancelled=True)
+                return {'CANCELLED'}
+
             if event.type in {'ESC', 'RIGHTMOUSE'} and event.value == 'PRESS':
                 self.finish(context, cancelled=True)
                 return {'CANCELLED'}
