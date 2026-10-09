@@ -40,7 +40,7 @@ DICTIONARY = {
         ("*", "Accurate"): "Genau",
         ("*", "Active connector"): "Aktiver Verbinder",
         ("*", "Active cut"): "Aktiver Schnitt",
-        ("*", "Add a cut (X/Y/Z or stroke), then Build"): "Schnitt hinzufügen (X/Y/Z oder Strich), dann Erzeugen",
+        ("*", "Add a cut (X/Y/Z, stroke, polyline or polygon), then Build"): "Schnitt hinzufügen (X/Y/Z, Strich, Polylinie oder Polygon), dann Erzeugen",
         ("*", "Add Connector"): "Verbinder hinzufügen",
         ("Operator", "Add Connector"): "Verbinder hinzufügen",
         ("*", "Add Plane Cut"): "Ebenenschnitt hinzufügen",
@@ -156,7 +156,6 @@ DICTIONARY = {
         ("*", "Taper %"): "Verjüngung %",
         ("*", "Target"): "Ziel",
         ("*", "Tenon"): "Zapfen",
-        ("*", "Transforms"): "Transformationen",
         ("*", "Type"): "Typ",
         ("*", "U (mm)"): "U (mm)",
         ("*", "Up"): "Nach oben",
@@ -177,6 +176,44 @@ DICTIONARY = {
         ("Operator", "Distribute"): "Verteilen",
         ("Operator", "Click"): "Klicken",
         ("Operator", "Rebuild"): "Neu erzeugen",
+        # Phase 4: polyline / polygon cuts, print checks and fixes
+        ("*", "Polyline"): "Polylinie",
+        ("Operator", "Polyline"): "Polylinie",
+        ("*", "Polygon"): "Polygon",
+        ("*", "Cut Out"): "Ausschneiden",
+        ("Operator", "Cut Out"): "Ausschneiden",
+        ("*", "Depth (mm)"): "Tiefe (mm)",
+        ("*", "Add Polyline Cut"): "Polylinienschnitt hinzufügen",
+        ("Operator", "Add Polyline Cut"): "Polylinienschnitt hinzufügen",
+        ("*", "Add Polygon Cut"): "Polygonschnitt hinzufügen",
+        ("Operator", "Add Polygon Cut"): "Polygonschnitt hinzufügen",
+        ("*", "Polyline: {n} points"): "Polylinie: {n} Punkte",
+        ("*", "Polygon: {n} corners"): "Polygon: {n} Ecken",
+        ("*", "Print checks"): "Druckprüfung",
+        ("*", "Fix"): "Beheben",
+        ("Operator", "Fix"): "Beheben",
+        ("*", "Mesh not checked yet"): "Mesh noch nicht geprüft",
+        ("*", "Rotation & scale applied"): "Drehung und Skalierung angewendet",
+        ("*", "Closed (no holes)"): "Geschlossen (keine Löcher)",
+        ("*", "{n} open edge(s), {m} loose"): "{n} offene Kante(n), {m} lose",
+        ("*", "Normals point outward"): "Normalen zeigen nach außen",
+        ("*", "No duplicate vertices"): "Keine doppelten Vertices",
+        ("*", "{n} duplicate vertices"): "{n} doppelte Vertices",
+        ("*", "{n} edge(s) with 3+ faces: fix in Edit Mode"): "{n} Kante(n) mit 3+ Flächen: im Bearbeitungsmodus beheben",
+        ("*", "Apply Rotation & Scale"): "Drehung und Skalierung anwenden",
+        ("Operator", "Apply Rotation & Scale"): "Drehung und Skalierung anwenden",
+        ("*", "Set Units to Millimeters"): "Einheiten auf Millimeter setzen",
+        ("Operator", "Set Units to Millimeters"): "Einheiten auf Millimeter setzen",
+        ("*", "Recalculate Normals"): "Normalen neu berechnen",
+        ("Operator", "Recalculate Normals"): "Normalen neu berechnen",
+        ("*", "Merge by Distance"): "Nach Abstand zusammenführen",
+        ("Operator", "Merge by Distance"): "Nach Abstand zusammenführen",
+        ("*", "Fill Holes"): "Löcher füllen",
+        ("Operator", "Fill Holes"): "Löcher füllen",
+        ("*", "Distance (mm)"): "Abstand (mm)",
+        ("*", "Objects"): "Objekte",
+        ("*", "Keep Units"): "Einheiten beibehalten",
+        ("*", "Keep Size"): "Größe beibehalten",
     },
     "fr_FR": {
         ("*", "Auto"): "Auto",
@@ -293,7 +330,7 @@ DICTIONARY = {
         ("*", "Accurate"): "정확",
         ("*", "Active connector"): "활성 커넥터",
         ("*", "Active cut"): "활성 컷",
-        ("*", "Add a cut (X/Y/Z or stroke), then Build"): "컷을 추가(X/Y/Z 또는 스트로크)한 뒤 빌드",
+        ("*", "Add a cut (X/Y/Z, stroke, polyline or polygon), then Build"): "컷을 추가(X/Y/Z, 스트로크, 폴리라인 또는 폴리곤)한 뒤 빌드",
         ("*", "Add Connector"): "커넥터 추가",
         ("Operator", "Add Connector"): "커넥터 추가",
         ("*", "Add Plane Cut"): "평면 컷 추가",
@@ -409,7 +446,6 @@ DICTIONARY = {
         ("*", "Taper %"): "테이퍼 %",
         ("*", "Target"): "대상",
         ("*", "Tenon"): "테논",
-        ("*", "Transforms"): "변환",
         ("*", "Type"): "종류",
         ("*", "U (mm)"): "U (mm)",
         ("*", "Up"): "위로",
@@ -446,7 +482,6 @@ DICTIONARY = {
         ("*", "Boolean solver order for curved cuts and connectors; every result is validated"): "곡선 컷과 커넥터의 불리언 솔버 순서; 모든 결과를 검증함",
         ("*", "Box tenon of width x height (cannot rotate)"): "폭 x 높이의 사각 테논(돌아가지 않음)",
         ("*", "Build the enabled cuts into a result collection (the original object is not modified). With a built part selected, the source object's stack is built. Esc cancels a running build"): "사용 중인 컷으로 결과 컬렉션을 만든다(원본 오브젝트는 바뀌지 않음). 빌드된 파트를 선택하면 원본의 스택을 빌드한다. 진행 중에 Esc로 취소",
-        ("*", "Check the source mesh for printing: manifold, loose geometry, applied transforms, mm units"): "출력용으로 원본 메시 검사: 매니폴드, 떨어진 지오메트리, 변환 적용, mm 단위",
         ("*", "Clearance 0.10 mm"): "공차 0.10 mm",
         ("*", "Clearance 0.20 mm"): "공차 0.20 mm",
         ("*", "Clearance 0.25 mm"): "공차 0.25 mm",
@@ -519,7 +554,6 @@ DICTIONARY = {
         ("*", "Stable identifier written onto built parts"): "빌드한 파트에 기록되는 고정 식별자",
         ("*", "Straighten the stroke and align it with the nearest world axis in the view"): "스트로크를 곧게 펴서 뷰에서 가장 가까운 월드 축에 맞춤",
         ("*", "Stroke points in world space (scripts; the modal fills them)"): "월드 공간의 스트로크 점(스크립트용; 모달이 채움)",
-        ("*", "Stroke polyline (object local space), STROKE cuts only"): "스트로크 폴리라인(오브젝트 로컬 공간), STROKE 컷 전용",
         ("*", "Tapered tenon with snap bumps"): "스냅 돌기가 있는 테이퍼 테논",
         ("*", "Tapered tenon: narrower towards the tip, self-centering"): "테이퍼 테논: 끝으로 갈수록 좁아져 저절로 중심이 맞음",
         ("*", "Target folder (empty = scene setting)"): "대상 폴더(비우면 씬 설정)",
@@ -536,6 +570,98 @@ DICTIONARY = {
         ("*", "World X"): "월드 X",
         ("*", "World Y"): "월드 Y",
         ("*", "World Z"): "월드 Z",
+        # Phase 4: polyline / polygon cuts, print checks and fixes
+        ("*", "Polyline"): "폴리라인",
+        ("Operator", "Polyline"): "폴리라인",
+        ("*", "Polygon"): "폴리곤",
+        ("*", "Cut Out"): "도려내기",
+        ("Operator", "Cut Out"): "도려내기",
+        ("*", "Depth (mm)"): "깊이 (mm)",
+        ("*", "Add Polyline Cut"): "폴리라인 컷 추가",
+        ("Operator", "Add Polyline Cut"): "폴리라인 컷 추가",
+        ("*", "Add Polygon Cut"): "폴리곤 컷 추가",
+        ("Operator", "Add Polygon Cut"): "폴리곤 컷 추가",
+        ("*", "Polyline: {n} points"): "폴리라인: 점 {n}개",
+        ("*", "Polygon: {n} corners"): "폴리곤: 꼭짓점 {n}개",
+        ("*", "Print checks"): "출력 검사",
+        ("*", "Fix"): "수정",
+        ("Operator", "Fix"): "수정",
+        ("*", "Mesh not checked yet"): "메시를 아직 검사하지 않음",
+        ("*", "Rotation & scale applied"): "회전·스케일 적용됨",
+        ("*", "Closed (no holes)"): "닫힘(구멍 없음)",
+        ("*", "{n} open edge(s), {m} loose"): "열린 모서리 {n}개, 떨어진 요소 {m}개",
+        ("*", "Normals point outward"): "법선이 바깥을 향함",
+        ("*", "No duplicate vertices"): "중복 정점 없음",
+        ("*", "{n} duplicate vertices"): "중복 정점 {n}개",
+        ("*", "{n} edge(s) with 3+ faces: fix in Edit Mode"): "면이 3개 이상인 모서리 {n}개: 편집 모드에서 수정",
+        ("*", "Apply Rotation & Scale"): "회전·스케일 적용",
+        ("Operator", "Apply Rotation & Scale"): "회전·스케일 적용",
+        ("*", "Set Units to Millimeters"): "단위를 밀리미터로 설정",
+        ("Operator", "Set Units to Millimeters"): "단위를 밀리미터로 설정",
+        ("*", "Recalculate Normals"): "법선 다시 계산",
+        ("Operator", "Recalculate Normals"): "법선 다시 계산",
+        ("*", "Merge by Distance"): "거리로 병합",
+        ("Operator", "Merge by Distance"): "거리로 병합",
+        ("*", "Fill Holes"): "구멍 채우기",
+        ("Operator", "Fill Holes"): "구멍 채우기",
+        ("*", "Distance (mm)"): "거리 (mm)",
+        ("*", "Objects"): "오브젝트",
+        ("*", "Keep Units"): "단위 유지",
+        ("*", "Keep Size"): "크기 유지",
+        # Phase 4 tooltips
+        ("*", "Apply the object's rotation and scale to its mesh; the cuts move with it, so they stay in place"):
+            "오브젝트의 회전과 스케일을 메시에 적용합니다. 컷도 함께 옮겨지므로 제자리에 남습니다",
+        ("*", "Check the source mesh for printing: holes and non-manifold edges, loose geometry, normals, duplicate "
+              "vertices, applied transforms, mm units (results and Fix buttons in the panel)"):
+            "원본 메시를 출력용으로 검사합니다: 구멍과 비매니폴드 모서리, 떨어진 지오메트리, 법선, 중복 정점, 적용된 변환, "
+            "mm 단위(결과와 수정 버튼은 패널에 표시)",
+        ("*", "Click points for a cut along straight segments, extruded along the view direction through the whole "
+              "object (LMB add point, Ctrl: 15 degree steps, Backspace remove last, Enter confirm, Esc cancel)"):
+            "직선 구간을 따라 자를 점들을 클릭합니다. 뷰 방향으로 오브젝트 전체를 관통하게 압출됩니다(LMB 점 추가, "
+            "Ctrl: 15도 단위, Backspace 마지막 점 삭제, Enter 확정, Esc 취소)",
+        ("*", "Click the corners of a region to cut it out as its own part (a prism along the view direction, "
+              "through the object or Depth deep; LMB add point, click the first point or Enter to close, Backspace "
+              "remove last, Esc cancel)"):
+            "영역의 꼭짓점을 클릭해 그 영역을 별도 파트로 도려냅니다(뷰 방향 프리즘, 오브젝트 관통 또는 깊이만큼; "
+            "LMB 점 추가, 첫 점 클릭이나 Enter로 닫기, Backspace 마지막 점 삭제, Esc 취소)",
+        ("*", "Cut along straight segments between clicked points, extruded along the view direction"):
+            "클릭한 점 사이의 직선 구간을 따라 자르는 컷, 뷰 방향으로 압출",
+        ("*", "Cut out the region inside a clicked closed polygon (a prism along the view direction, through the "
+              "object or Depth deep) as its own part"):
+            "클릭한 닫힌 폴리곤 안의 영역을 별도 파트로 도려냅니다(뷰 방향 프리즘, 오브젝트 관통 또는 깊이만큼)",
+        ("*", "Easy polygon cut-out: how deep it reaches into the object from its front along the view (0 = through "
+              "the whole object, no connectors)"):
+            "Easy 폴리곤 도려내기: 뷰 방향으로 오브젝트 앞면에서 얼마나 깊이 들어가는지(0 = 오브젝트 전체 관통, 커넥터 없음)",
+        ("*", "Fill the holes of the source mesh and delete loose vertices and edges (edges with more than two faces "
+              "are left for Edit Mode)"):
+            "원본 메시의 구멍을 채우고 떨어진 정점과 모서리를 삭제합니다(면이 셋 이상인 모서리는 편집 모드에서 직접 수정)",
+        ("*", "How deep the cut-out reaches from the object's front along the view (0 = through the whole object; "
+              "-1 = keep the redrawn cut's depth, Easy: the Easy depth, otherwise 0)"):
+            "도려낸 영역이 뷰 방향으로 오브젝트 앞면에서 얼마나 깊이 들어가는지(0 = 오브젝트 전체 관통; -1 = 다시 그리는 "
+            "컷의 깊이 유지, Easy는 Easy 깊이, 그 밖에는 0)",
+        ("*", "Keep the objects as they are: 1 unit becomes 1 mm (right after importing an STL in millimeters into a "
+              "meter scene)"):
+            "오브젝트를 그대로 둡니다: 1 단위가 1 mm가 됩니다(밀리미터 STL을 미터 씬에 가져온 직후에 알맞음)",
+        ("*", "Merge vertices of the source mesh closer than the distance (Merge by Distance)"):
+            "원본 메시에서 거리보다 가까운 정점들을 병합합니다(거리로 병합)",
+        ("*", "Points in world space (scripts; the modal fills them)"):
+            "월드 공간의 점(스크립트용; 모달이 채움)",
+        ("*", "Polygon cuts: how deep the cut-out reaches into the object from its front along the view direction "
+              "(0 = through the whole object); connectors sit on the floor of a cut-out with a depth"):
+            "폴리곤 컷: 도려낸 영역이 뷰 방향으로 오브젝트 앞면에서 얼마나 깊이 들어가는지(0 = 오브젝트 전체 관통); "
+            "깊이가 있으면 커넥터는 도려낸 영역의 바닥에 놓임",
+        ("*", "Recalculate the source mesh's face normals to point outward"):
+            "원본 메시의 면 법선이 바깥을 향하도록 다시 계산합니다",
+        ("*", "Redraw this cut instead of adding a new one"): "새로 추가하지 않고 이 컷을 다시 그림",
+        ("*", "Scale every object in the scene so its physical size stays the same (a model built in meters keeps "
+              "its millimeter size); apply the scale afterwards"):
+            "씬의 모든 오브젝트를 스케일해 실제 크기를 유지합니다(미터로 만든 모델이 같은 밀리미터 크기를 유지); "
+            "그 뒤 스케일을 적용하세요",
+        ("*", "Set the scene to Metric, Millimeters and Unit Scale 0.001 (1 unit = 1 mm, what slicers expect)"):
+            "씬을 Metric, Millimeters, Unit Scale 0.001로 설정합니다(1 단위 = 1 mm, 슬라이서가 기대하는 값)",
+        ("*", "Stroke / polyline / polygon points (object local space)"):
+            "스트로크 / 폴리라인 / 폴리곤 점(오브젝트 로컬 공간)",
+        ("*", "Vertices closer than this are merged"): "이보다 가까운 정점은 병합됩니다",
     },
     "sw": {
         ("*", "Auto"): "Otomatiki",
