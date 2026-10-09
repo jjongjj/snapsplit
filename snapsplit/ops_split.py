@@ -395,8 +395,11 @@ def build_orange_preview_material():
     nt.links.new(transp.outputs[0], mix.inputs[1])
     nt.links.new(emis.outputs[0], mix.inputs[2])
     nt.links.new(mix.outputs[0], out.inputs[0])
-    mat.blend_method = 'BLEND'
-    mat.shadow_method = 'NONE'
+    # Removed in newer Blender versions (shadow_method since 4.2): set only if present.
+    if hasattr(mat, "blend_method"):
+        mat.blend_method = 'BLEND'
+    if hasattr(mat, "shadow_method"):
+        mat.shadow_method = 'NONE'
     mat.use_backface_culling = False
     return mat
 
