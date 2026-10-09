@@ -318,10 +318,43 @@ headless 적대 케이스(검증자 스크래치, 커밋 안 함): 지그재그�
 
 ---
 
+## P2 후속 수정 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop 398154a)
+
+독립 검증자, 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa8/`, 같은 안전 규칙. Millimeters + Unit Scale 0.001. 재로드: `bl_ext.splitforge_dev.splitforge*` 43개 purge 후 enable.
+
+1. 구멍 메운 Suzanne(눈 포함, Subsurf 2 모디파이어 → 평가 메시 ~8k 면, `QA8_Monkey`), 눈을 지나는 S자(gap 0.5) + 수동 커넥터 1(u −8)(`qa8/scenario.py`):
+   - Accurate 2.16 s: 곡선 컷 EXACT_SELF ×2, 커넥터 UNION/DIFFERENCE는 EXACT_SELF "not manifold" → MANIFOLD. 정보 "Booleans (Accurate): 2x EXACT_SELF, 2x MANIFOLD; fallbacks: …".
+     파트 6976.7 / 8612.4 mm³(눈 겹침 합쳐짐).
+   - Fast 0.21 s: "Booleans (Fast): 4x MANIFOLD", 파트 7033.4 / 8733.7(겹침 유지, A는 2셸·각 셸 닫힘).
+   - Auto(8k 면 < 200k) = Accurate와 같은 결과. 모두 매니폴드, 원본 해시 불변, 임시 데이터 0.
+2. 갭 UX(`qa8/stroke2.py`, `gap6.py`, `fix.py`): 3주기 S자 Stroke 2에 gap 0.5–4 → 문제 없음, 5 이상 → `cut.problem` "The stroke bends too sharply for its gap (6) …"
+   (Build의 BuildError와 같은 문구). 패널: 목록 이름 옆 경고 아이콘, 컷 상자에 빨간 "Cannot build this cut:" + 줄바꿈된 이유
+   [패널](qa/p2f_live_52_gap_problem.png). 그 상태로 Build → 같은 오류, 이전 파트 유지. 0.5로 내리면 문제 문자열 비고 Build 성공. 고아 메쉬·모달 0.
+
+headless(검증자 스크래치, 커밋 안 함):
+- 삼각분할 여유(D9 재확인): 한쪽 결과에 0.5–3 % 손실 주입. 촘촘한 메시(ico 4단계, UV 96×48, Subsurf한 머리만 Suzanne 1·2단계) 여유 0–0.09 % → 전부 거부·재시도.
+  **거친 비평면 메시에서는 여유가 커서 손실 통과**: 원본 머리만 Suzanne(438면) 여유 0.73 %(0.5 % 손실 통과), 꼭짓점을 흔든 큐브 1.3 % / 3.3 %(최대 3 % 손실 통과),
+  비평면 64각형 뚜껑 원기둥 5.9 % / 15.3 %(3 % 손실 모두 통과). 삼각형 메시(STL)는 여유 0.
+- Accurate 평면 Build 커넥터 폴백 원인: 평면 컷(bisect)은 눈/머리 겹침을 그대로 두므로 파트의 "before" 부피가 겹침(AA 834.7, AB 707.2 mm³, 8k 면)을 두 번 센다.
+  EXACT_SELF는 겹침을 합치며 핀을 더해 66871.6 = 자기합집합 66580.0 + 핀 291.6으로 **정확**하지만 "volume did not grow"로 거부되어 MANIFOLD로 간다(51만 면에서도 같은 3건).
+- 쪽 판정(D11): 그린(스무딩된) 스트로크 10종 2만 점씩 정확한 2D 판정과 불일치 0. `clean=False` 원시 지그재그(꺾임 140°)에서 649/20000 불일치(리본에서 최대 5.4 mm) —
+  최근접 면 법선이 날카로운 볼록 꼭짓점에서 틀림. 같은 스트로크 + 평면 컷 + 커넥터 빌드 4종은 관입 0(다른 검사가 막음).
+
+열린 항목:
+- [중간~낮음] D13: 삼각분할 여유에 상한이 없어 거친 비평면 사각형/n각형 메시에서 쌍 검사가 다시 느슨해짐(위 수치). 제안: 조각을 먼저 삼각분할하거나 여유 상한(예: 0.5 %).
+- [중간] D14: 셸이 겹친 평면 파트의 커넥터 불리언에서 Accurate의 EXACT_SELF 결과(정확)를 부피 검사가 거부 → MANIFOLD 폴백(정보 줄에 표시됨). Accurate 툴팁("셸을 하나로 합침")과 다르고
+  51만 면에서 ~47 s를 버림. 제안: self_intersect일 때 before를 자기합집합 부피로.
+- [낮음] D15: 리본 법선 쪽 판정이 꺾임 > ~120° 꼭짓점 근처에서 틀림(`clean=False` 스크립트 입력만 해당); 2D 폴백 분기를 쓰지 않는 뮤턴트를 테스트가 못 잡음.
+- [낮음] Fast/Auto(>200k)에서 겹친 셸이 남는다는 사실은 툴팁에만 있고 Build 정보 줄은 솔버 이름만 보여 준다. 각 셸은 닫혀 있고 부피 양수(슬라이서용으로 유효).
+- [낮음] `cut.problem`은 갭 변경·스트로크 저장 때만 다시 계산(나중에 오브젝트 스케일·단위 배율을 바꾸면 갱신되지 않음; Build는 항상 다시 검사).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| P2 후속 수정 라이브(MCP) | — | PASS (결함 D13–D15) | 2026-10-09 verifier, develop 398154a: 품질 Accurate/Fast/Auto 비교(눈 있는 Suzanne S자), 정보 줄 솔버·폴백, 갭 문제 패널 표시·해제. `--gui` 12×2·헤드리스 37/37 ×2·`--slow` PASS. 위 "P2 후속 수정 라이브 검증" 절 |
 | P2 곡선 컷 라이브(MCP) | — | PASS (결함 D9–D11) | 2026-10-09 verifier, develop 29cd845: 큐브·Suzanne(눈) S자 gap 0.5, 곡면 시임 커넥터, Build 매니폴드·관입 0·원본 불변·눈 정보 메시지. `--gui` 12시나리오 ×2·헤드리스 34/34 ×2·`--slow` PASS. 열린 항목 — 위 "P2 곡선 컷 라이브 검증" 절 |
 | QA-7 곡선(스트로크) 컷 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p2-curved: `--gui` p2_stroke — 실제 LMB 드래그·Enter·Ctrl+Z/Ctrl+Shift+Z·모달 Build(눈 셸 정보)·Esc/RMB·Shift 스냅·Redraw·파일 로드. 사람 확인 남음: 리본 프리뷰 가독성, 원근 뷰에서 그린 감각(압출은 뷰 방향 하나, 원근 광선이 아님) [4.5](qa/p2_stroke_4.5.png) [5.2](qa/p2_stroke_5.2.png) |
 | QA-8 Build 진행률 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p2_build_progress — 13만 면, 빌드 중 상태바 텍스트 [5.2](qa/p2_build_progress_5.2.png), Esc 중간 취소 이전 결과 유지. 사람 확인 남음: 51만 면에서 불리언 한 단계(~30 s) 동안은 UI가 멈춤(단계 사이에만 갱신) |

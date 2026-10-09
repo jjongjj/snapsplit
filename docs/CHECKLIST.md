@@ -182,6 +182,7 @@
 
 결과(2026-10-09, fix/p2-followups): 헤드리스 37/37 PASS ×2(4.5.5/5.2.2), `--gui` 12개 시나리오 ×2 PASS, `--slow test_perf_large`(5.2) PASS
 (위 P2F-7 수치).
+- 독립 검증(2026-10-09, verifier, develop 398154a): 헤드리스 37/37 ×2 PASS(4.5.5/5.2.2), `--gui` 12시나리오 ×2 PASS, `--slow`(5.2) PASS: 평면 Auto 14.31 s / Accurate 61.43 s, S자 Auto 6.35 s(MANIFOLD×4) / Accurate 88.53 s(EXACT_SELF×4). 뮤테이션 6건 중 5건 검출(여유 0, D10 경고 제거, Distribute 여유 0, Auto 크기 무시, 항상 느슨); 리본 쪽 판정에서 2D 폴백 제거는 미검출. 3 % 손실 주입은 촘촘한 메시에서 모두 거부, 단 거친 비평면 메시(비평면 n각형 여유 최대 15 %)에서는 통과(D13). Accurate 평면 Build 커넥터 폴백 3건은 EXACT_SELF가 틀린 것이 아니라 겹친 셸을 두 번 센 before 부피 때문(D14). 원시 140° 꺾임 스트로크에서 쪽 판정 불일치(D15, 낮음). 라이브 5.2 PASS(MANUAL_QA "P2 후속 수정 라이브 검증").
 
 ## Phase 3 — 커넥터 고도화 + 레거시 제거
 
