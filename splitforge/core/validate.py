@@ -78,6 +78,5 @@ def validate(obj, scene=None, check_mesh=True):
     rep.mm_per_unit = units.bu_to_mm_factor(scene)
     if not units.is_mm_scene(scene):
         rep.unit_is_mm = False
-        rep.messages.append(f"1 unit = {rep.mm_per_unit:g} mm "
-                            f"(Unit Scale 0.001 makes 1 unit = 1 mm, the usual 3D-print setup)")
+        rep.messages.append(f"1 unit = {rep.mm_per_unit:g} mm (Unit Scale 0.001: 1 mm)")
     return rep
