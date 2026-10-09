@@ -3467,6 +3467,26 @@ class SNAP_OT_place_connectors_click(Operator):
     def b(self, obj):
         self._b_name = obj.name if obj is not None else ""
 
+    @property
+    def preview_obj(self):
+        """Main preview object, resolved by name; None if missing (e.g. removed by undo)."""
+        return bpy.data.objects.get(getattr(self, "_preview_main_name", ""))
+
+    @preview_obj.setter
+    def preview_obj(self, obj):
+        self._preview_main_name = obj.name if obj is not None else ""
+
+    @property
+    def preview_objs(self):
+        """All live preview objects (main + helpers such as snap spheres), resolved by name."""
+        objs = (bpy.data.objects.get(n) for n in getattr(self, "_preview_names", ()))
+        return [o for o in objs if o is not None]
+
+    def _preview_missing(self):
+        """True if a preview was created but at least one of its objects no longer exists."""
+        names = getattr(self, "_preview_names", ())
+        return bool(names) and any(n not in bpy.data.objects for n in names)
+
     def invoke(self, context, event):
         """Start modal placement with live preview for two selected mesh parts."""
         props = context.scene.snapsplit
@@ -3540,11 +3560,29 @@ class SNAP_OT_place_connectors_click(Operator):
         xray_acquire(context, "click_place")
 
 
+        self._create_preview_objects(props)
+
+
+        # Key hints in the status bar; reset in finish()
+        self.roles_flipped_live = False
+        self._update_status_text(context)
+
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def _create_preview_objects(self, props):
+        """(Re)create the wireframe placement preview.
+
+        Only object names are kept on the operator (preview_obj / preview_objs are
+        name-backed properties), so an undo that frees the preview objects never
+        leaves dangling references; the modal recreates them when they are missing.
+        """
+        preview_objs = []
         try:
             ctype_cur = getattr(props, "connector_type", "CYL_PIN")
             prev_coll = ensure_collection("_SnapSplit_Preview")
 
-            self.preview_objs = []
+            preview_objs = []
             self.preview_obj = None
 
             if ctype_cur in {"CYL_PIN", "SNAP_PIN"}:
@@ -3556,7 +3594,7 @@ class SNAP_OT_place_connectors_click(Operator):
                 pin_prev.hide_select = True
                 prev_coll.objects.link(pin_prev)
                 self.preview_obj = pin_prev
-                self.preview_objs.append(pin_prev)
+                preview_objs.append(pin_prev)
 
 
             if ctype_cur == "SNAP_PIN":
@@ -3587,7 +3625,7 @@ class SNAP_OT_place_connectors_click(Operator):
                     sph_prev["_snapsplit_local_offset_A"] = local_A
                     sph_prev["_snapsplit_local_offset_B"] = local_B
                     prev_coll.objects.link(sph_prev)
-                    self.preview_objs.append(sph_prev)
+                    preview_objs.append(sph_prev)
 
             elif ctype_cur in {"RECT_TENON", "SNAP_TENON", "DOVETAIL", "SNAP_DOVETAIL", "CUSTOM"}:
                 if ctype_cur in {"DOVETAIL", "SNAP_DOVETAIL"}:
@@ -3621,7 +3659,7 @@ class SNAP_OT_place_connectors_click(Operator):
                             custom_prev.hide_select = True
                             prev_coll.objects.link(custom_prev)
                             self.preview_obj = custom_prev
-                            self.preview_objs.append(custom_prev)
+                            preview_objs.append(custom_prev)
                     # If no source object is picked yet, silently skip the preview here;
                     # the actual LEFTMOUSE placement already reports a clear error in that case.
 
@@ -3655,7 +3693,7 @@ class SNAP_OT_place_connectors_click(Operator):
                         sph_prev["_snapsplit_local_offset_A"] = local_A
                         sph_prev["_snapsplit_local_offset_B"] = local_B
                         prev_coll.objects.link(sph_prev)
-                        self.preview_objs.append(sph_prev)
+                        preview_objs.append(sph_prev)
 
                 # Rectangular preview box only for the tenon types.
                 # (Dovetail already created its own ten_prev above; Custom has its own preview.)
@@ -3675,7 +3713,7 @@ class SNAP_OT_place_connectors_click(Operator):
                     ten_prev.hide_select = True
                     prev_coll.objects.link(ten_prev)
                     self.preview_obj = ten_prev
-                    self.preview_objs.append(ten_prev)
+                    preview_objs.append(ten_prev)
 
 
                 if ctype_cur == "SNAP_TENON":
@@ -3705,7 +3743,7 @@ class SNAP_OT_place_connectors_click(Operator):
                         sph_prev["_snapsplit_local_offset_A"] = local_A
                         sph_prev["_snapsplit_local_offset_B"] = local_B
                         prev_coll.objects.link(sph_prev)
-                        self.preview_objs.append(sph_prev)
+                        preview_objs.append(sph_prev)
 
                 if ctype_cur == "SNAP_DOVETAIL":
                     mm = unit_mm()
@@ -3748,22 +3786,16 @@ class SNAP_OT_place_connectors_click(Operator):
                         sph_prev["_snapsplit_local_offset_A"] = local_A
                         sph_prev["_snapsplit_local_offset_B"] = local_B
                         prev_coll.objects.link(sph_prev)
-                        self.preview_objs.append(sph_prev)
+                        preview_objs.append(sph_prev)
 
         except Exception:
             # Print the error to the console instead of hiding it; placing by click still works
             import traceback
             traceback.print_exc()
             self.preview_obj = None
-            self.preview_objs = []
+            preview_objs = []
 
-
-        # Key hints in the status bar; reset in finish()
-        self.roles_flipped_live = False
-        self._update_status_text(context)
-
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
+        self._preview_names = [o.name for o in preview_objs]
 
     def finish(self, context, cancelled=False):
 
@@ -3779,12 +3811,8 @@ class SNAP_OT_place_connectors_click(Operator):
         try:
             to_purge = set()
 
-            if getattr(self, "preview_obj", None) and self.preview_obj.name in bpy.data.objects:
-                to_purge.add(bpy.data.objects.get(self.preview_obj.name))
-            if getattr(self, "preview_objs", None):
-                for o in list(self.preview_objs):
-                    if o and o.name in bpy.data.objects:
-                        to_purge.add(bpy.data.objects.get(o.name))
+            # Names only: objects freed by undo are simply skipped
+            to_purge.update(self.preview_objs)
 
             prev_coll = bpy.data.collections.get("_SnapSplit_Preview")
             name_prefixes = (
@@ -3862,11 +3890,7 @@ class SNAP_OT_place_connectors_click(Operator):
             except Exception:
                 pass
 
-            try:
-                if getattr(self, "preview_objs", None) is not None:
-                    self.preview_objs.clear()
-            except Exception:
-                pass
+            self._preview_names = []
             self.preview_obj = None
 
             try:
@@ -3913,6 +3937,11 @@ class SNAP_OT_place_connectors_click(Operator):
             # After a swap the existing preview code runs once with the last mouse position,
             # so the preview flips immediately without moving the mouse.
             if event.type == 'MOUSEMOVE' or swapped_now:
+                # Undo removes preview objects created after the last undo step: rebuild them
+                if self._preview_missing():
+                    for o in self.preview_objs:
+                        bpy.data.objects.remove(o)
+                    self._create_preview_objects(self.props)
                 try:
                     hit = self._intersect_mouse_with_seam_plane(context, event)
                     if hit is not None:
@@ -3937,7 +3966,7 @@ class SNAP_OT_place_connectors_click(Operator):
                             except Exception:
                                 z_axis_world = None
                             for o in self.preview_objs:
-                                if o is self.preview_obj:
+                                if o.name == self._preview_main_name:
                                     continue
                                 try:
                                     if "_snapsplit_local_offset_B" in o:

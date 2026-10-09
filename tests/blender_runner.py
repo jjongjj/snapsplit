@@ -99,7 +99,8 @@ def select_cases(cases_dir, patterns):
 
 def main():
     args = parse_args()
-    report = {"blender": bpy.app.version_string, "cases": [], "notes": []}
+    report = {"blender": bpy.app.version_string, "tempdir": bpy.app.tempdir,
+              "cases": [], "notes": []}
 
     def write_report():
         with open(args.out, "w", encoding="utf-8") as f:

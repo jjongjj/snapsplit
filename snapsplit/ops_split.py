@@ -1366,12 +1366,15 @@ class SNAP_OT_adjust_split_axis(Operator):
             updated = True
 
         if updated:
-            # Undo may have removed the preview plane; recreate it by name if needed.
-            try:
-                plane = create_or_get_preview_plane(context, obj, self.axis, self._plane_name)
+            # Look the preview plane up by name; recreate it only if undo removed it.
+            plane = bpy.data.objects.get(self._plane_name)
+            if plane is None:
+                try:
+                    plane = create_or_get_preview_plane(context, obj, self.axis, self._plane_name)
+                except Exception as ex:
+                    log.warning("Adjust split axis: could not recreate preview plane: %s", ex)
+            if plane is not None:
                 plane.matrix_world = build_preview_matrix(obj, self.axis, self.current_world_pos)
-            except Exception:
-                pass
 
             parts_cnt = max(2, int(getattr(props, "parts_count", 2)))
             offset_scene = float(getattr(props, "split_offset_mm", 0.0)) * unit_mm()
