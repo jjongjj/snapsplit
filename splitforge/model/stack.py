@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# This file is part of SplitForge (fork of SnapSplit by Christoph Medicus).
+
+# model/stack.py
+"""Cut stack manipulation (add/remove/move/duplicate/clear) and owner lookup.
+
+Every function takes the object (an ID) and resolves its stack on each call;
+callers must not keep the returned PropertyGroups across undo steps or events.
+"""
+
+import bpy
+from mathutils import Vector
+
+from ..core import meshlib, naming
+from ..cuts import plane
+
+CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "gap_mm", "cap", "distribution",
+              "connector_count", "connector_rows", "margin_pct")
+CONNECTOR_FIELDS = ("enabled", "kind", "u", "v", "rotation_deg", "width_mm", "height_mm", "length_mm",
+                    "pin_side", "clearance_mm")
+
+
+def get_stack(obj):
+    """The cut stack of ``obj`` (None for non-mesh objects)."""
+    if obj is None or obj.type != 'MESH':
+        return None
+    return getattr(obj, naming.OBJECT_STACK, None)
+
+
+def owner_of(obj):
+    """The object whose stack applies to ``obj``.
+
+    A built part points back to its source (ID reference, survives renames;
+    the source name as fallback); every other mesh object owns its own stack.
+    """
+    if obj is None or obj.type != 'MESH':
+        return None
+    src = obj.get(naming.PROP_SOURCE_OBJECT)
+    if not isinstance(src, bpy.types.Object):
+        name = obj.get(naming.PROP_SOURCE)
+        src = bpy.data.objects.get(name) if name else None
+    if src is not None and src != obj and src.type == 'MESH':
+        return src
+    return obj
+
+
+def context_owner(context):
+    return owner_of(getattr(context, "active_object", None))
+
+
+def active_cut(obj):
+    stack = get_stack(obj)
+    if stack is None or not stack.cuts:
+        return None
+    return stack.cuts[min(stack.active_index, len(stack.cuts) - 1)]
+
+
+def world_bbox_center(obj):
+    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    return sum(corners, Vector()) / 8.0
+
+
+def _new_uid(stack):
+    uid = f"C{stack.next_uid}"
+    stack.next_uid += 1
+    return uid
+
+
+def add_cut(obj, origin, normal, tangent=None, name=None):
+    """Append a plane cut (local origin/normal/tangent) and make it active. Returns its index."""
+    stack = get_stack(obj)
+    cut = stack.cuts.add()
+    cut.uid = _new_uid(stack)
+    cut.name = name or f"Cut {len(stack.cuts)}"
+    n, t, _b = meshlib.orthonormal_basis(normal, tangent)
+    cut.origin = Vector(origin)
+    cut.normal = n
+    cut.tangent = t
+    stack.active_index = len(stack.cuts) - 1
+    return stack.active_index
+
+
+def add_axis_cut(obj, axis, offset, name=None):
+    """Add a cut perpendicular to a world axis through the bbox center + offset (BU)."""
+    origin, normal, tangent = plane.axis_plane(obj.matrix_world, world_bbox_center(obj), axis, offset)
+    return add_cut(obj, origin, normal, tangent, name or f"Cut {axis}")
+
+
+def _resolve_index(stack, index):
+    if index < 0:
+        index = stack.active_index
+    if not 0 <= index < len(stack.cuts):
+        raise IndexError(f"no cut at index {index}")
+    return index
+
+
+def remove_cut(obj, index=-1):
+    stack = get_stack(obj)
+    index = _resolve_index(stack, index)
+    stack.cuts.remove(index)
+    stack.active_index = max(0, min(stack.active_index, len(stack.cuts) - 1))
+
+
+def move_cut(obj, index, direction):
+    """Move a cut 'UP' (towards index 0) or 'DOWN'. Returns the new index."""
+    stack = get_stack(obj)
+    index = _resolve_index(stack, index)
+    target = index - 1 if direction == 'UP' else index + 1
+    if not 0 <= target < len(stack.cuts):
+        return index
+    stack.cuts.move(index, target)
+    stack.active_index = target
+    return target
+
+
+def copy_connector(src, dst):
+    for f in CONNECTOR_FIELDS:
+        setattr(dst, f, getattr(src, f))
+
+
+def duplicate_cut(obj, index=-1):
+    """Insert a copy (new uid, same connectors) right after the cut. Returns its index."""
+    stack = get_stack(obj)
+    index = _resolve_index(stack, index)
+    src = stack.cuts[index]
+    dst = stack.cuts.add()
+    for f in CUT_FIELDS:
+        setattr(dst, f, getattr(src, f))
+    for c in src.connectors:
+        copy_connector(c, dst.connectors.add())
+    dst.uid = _new_uid(stack)
+    dst.name = src.name + " copy"
+    new_index = len(stack.cuts) - 1
+    stack.cuts.move(new_index, index + 1)
+    stack.active_index = index + 1
+    return index + 1
+
+
+def clear(obj):
+    stack = get_stack(obj)
+    stack.cuts.clear()
+    stack.active_index = 0

@@ -1,0 +1,22 @@
+schema_version = "1.0.0"
+
+# SplitForge is a GPL fork of SnapSplit by Christoph Medicus (Betakontext),
+# https://github.com/Betakontext/snapsplit. "SplitForge" is a temporary working
+# name: renaming means changing `id`/`name` here, the package folder name and the
+# constants in core/naming.py.
+id = "splitforge"
+version = "0.3.0-dev"
+name = "SplitForge"
+tagline = "Non-destructive cut stacks and connectors for 3D printing"
+maintainer = "hyojongchu (fork); upstream SnapSplit: Christoph Medicus"
+contact = "dev@betakontext.de"
+website = "https://github.com/jjongjj/snapsplit"
+issues = "https://github.com/jjongjj/snapsplit"
+type = "add-on"
+blender_version_min = "4.2.0"
+tags = ["Modeling", "Mesh", "Object", "Import-Export"]
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = [
+  "2026 Christoph Medicus (SnapSplit)",
+  "2026 SplitForge contributors",
+]

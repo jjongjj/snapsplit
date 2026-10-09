@@ -1,3 +1,20 @@
+# SplitForge (fork of SnapSplit)
+
+**SplitForge** (temporary working name) is a GPL-3.0-or-later fork of
+[SnapSplit](https://github.com/Betakontext/snapsplit) by Christoph Medicus (Betakontext).
+It adds a non-destructive workflow on top of SnapSplit: a per-object **cut stack** (Draft
+mode: add / edit / disable / reorder planar cuts, then **Build**; Easy mode: one click cut
++ build), pin/socket **connector records** per cut (position, size, rotation, pin side,
+clearance), a **Build** that never modifies the original object (results go to the
+collection `SplitForge_Build_<object>`), and **Export** of all parts to STL/OBJ/FBX in
+millimeters. The original SnapSplit tools stay available under the collapsed **Legacy**
+sub-panel until they are replaced. N-panel tab: **SplitForge**.
+
+Credit for the original segmentation, capping and connector tools goes to the SnapSplit
+author; the upstream description follows.
+
+---
+
 # SnapSplit
 
 SnapSplit is a Blender add-on for splitting 3D models into printable parts and creating matching connectors and sockets. It is useful for models that exceed your print bed, modular sculptures, props, prototypes, and other projects that need to be assembled after printing.

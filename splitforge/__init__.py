@@ -3,9 +3,10 @@ Copyright (C) 2026 Christoph Medicus
 https://dev.betakontext.de
 dev@betakontext.de
 
-This file is part of SnapSplit
+This file is part of SplitForge, a fork of SnapSplit by Christoph Medicus
+(https://github.com/Betakontext/snapsplit).
 
-SnapSplit is free software; you can redistribute it and/or
+SplitForge is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
 as published by the Free Software Foundation; either version 3
 of the License, or (at your option) any later version.
@@ -20,16 +21,15 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 '''
 # __init__.py
 
+# Ignored when installed as an extension (blender_manifest.toml is authoritative).
 bl_info = {
-    "name": "SnapSplit  Print-ready segmentation with connectors",
-    "author": "Christoph Medicus",
-    "email": "dev@betakontext.de",
-    "website": "https://dev.betakontext.de",
-    "version": (0, 2, 0),
-    "blender": (5, 2, 0),
-    "location": "View3D > N-Panel > SnapSplit",
+    "name": "SplitForge",
+    "author": "SplitForge contributors; SnapSplit by Christoph Medicus",
+    "version": (0, 3, 0),
+    "blender": (4, 2, 0),
+    "location": "View3D > N-Panel > SplitForge",
     "description": (
-        "Split meshes into printable parts and generate fitting connectors for 3D printing."
+        "Non-destructive cut stacks and connectors for 3D printing (fork of SnapSplit)."
     ),
     "warning": "",
     "doc_url": "",
@@ -41,6 +41,8 @@ import importlib
 
 import bpy
 
+from .core.naming import ADDON_NAME
+
 # Import submodules
 from . import localization  # translation data (DICTIONARY), no register() of its own
 from . import utils
@@ -50,7 +52,11 @@ from . import ops_split
 from . import ops_connectors
 from . import ops_align
 from . import ops_freehand
-from . import ui
+from .model import props as model_props
+from .ops import ops_stack, ops_cut_plane, ops_connector, ops_build, ops_export
+from .ui import overlay as ui_overlay
+from .ui import panel as ui_panel
+from .ui import legacy as ui_legacy  # "Legacy" sub-panel of the main panel (until Phase 3)
 
 # Set to False for release builds to skip the development hot-reload.
 DEV_RELOAD = False
@@ -64,7 +70,15 @@ _modules = [
     ops_connectors,
     ops_align,
     ops_freehand,
-    ui,
+    model_props,
+    ops_stack,
+    ops_cut_plane,
+    ops_connector,
+    ops_build,
+    ops_export,
+    ui_overlay,
+    ui_panel,
+    ui_legacy,
 ]
 
 # Modules whose register() completed successfully (in registration order)
@@ -99,14 +113,14 @@ def _register_translations():
 
     skipped = sorted(set(localization.DICTIONARY) - set(dictionary))
     if skipped:
-        print(f"SnapSplit: locales unknown to this Blender build were skipped: {skipped}")
+        print(f"{ADDON_NAME}: locales unknown to this Blender build were skipped: {skipped}")
 
     # Hot-reload safety: drop a stale registration before registering again
     _unregister_translations()
     try:
         bpy.app.translations.register(__name__, dictionary)
     except Exception as exc:
-        print(f"SnapSplit: translation registration failed, UI stays English: {exc}")
+        print(f"{ADDON_NAME}: translation registration failed, UI stays English: {exc}")
 
 
 # ---------------------------
@@ -114,7 +128,7 @@ def _register_translations():
 # ---------------------------
 
 def register():
-    """Register translations and all SnapSplit submodules (hot-reload aware)."""
+    """Register translations and all submodules (hot-reload aware)."""
     # Reload modules during development to pick up edits without restarting Blender
     if DEV_RELOAD:
         for m in _modules:
@@ -147,7 +161,7 @@ def unregister():
             m.unregister()
         except Exception as exc:
             # Keep going: one failing module must not block the others
-            print(f"SnapSplit: unregister failed in {m.__name__}: {exc}")
+            print(f"{ADDON_NAME}: unregister failed in {m.__name__}: {exc}")
 
     _unregister_translations()
 

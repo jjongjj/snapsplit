@@ -20,12 +20,13 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, see <https://www.gnu.org/licenses>.
 """
 
-# ui.py
+# ui/legacy.py (was ui.py)
 
 import bpy
 from bpy.types import Panel
-from .utils import is_lang_de  # kept import (may be used elsewhere)
-from .profiles import MATERIAL_PROFILES  # used for tolerance preview
+from ..utils import is_lang_de  # kept import (may be used elsewhere)
+from ..profiles import MATERIAL_PROFILES  # used for tolerance preview
+from ..core import naming
 
 
 def _exists(obj, attr):
@@ -38,11 +39,13 @@ def _exists(obj, attr):
 
 
 class SNAP_PT_panel(Panel):
-    """Main SnapSplit UI panel in the 3D Viewport N-Panel."""
+    """Legacy SnapSplit UI, a collapsed sub-panel of the main panel until Phase 3."""
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "SnapSplit"
-    bl_label = "SnapSplit"
+    bl_category = naming.UI_CATEGORY
+    bl_label = "Legacy"
+    bl_parent_id = naming.cls("PT", "main")
+    bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
     def poll(cls, context):

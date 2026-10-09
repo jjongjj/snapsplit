@@ -3,13 +3,14 @@
 # This file is part of SnapSplit.
 """Host-side test runner.
 
-Copies ``snapsplit/`` into a temporary extension repository, runs
+Copies the add-on package (``splitforge/``) into a temporary extension repository, runs
 ``tests/blender_runner.py`` inside each requested Blender (headless), collects
 the JSON reports and prints a summary. Exit code 0 only if every selected case
 passed in every Blender version.
 
 Usage:
-    python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow] [--gui]
+    python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow]
+                                [--gui [--gui-only] [--gui-scenario NAME]...]
 
 ``--gui`` additionally runs the modal-operator scenarios in ``tests/gui/gui_runner.py``
 (QA-1..QA-4 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
@@ -38,7 +39,26 @@ BL52 = os.environ.get("BL52", "/mnt/c/Program Files/Blender Foundation/Blender 5
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(TESTS_DIR)
-ADDON_DIR = os.path.join(ROOT_DIR, "snapsplit")
+
+
+def _find_addon():
+    """(directory, package name): the top-level folder holding blender_manifest.toml.
+
+    The package is installed under its manifest ``id`` (the extension module name),
+    so renaming the add-on only touches the manifest and the folder name.
+    """
+    for entry in sorted(os.listdir(ROOT_DIR)):
+        manifest = os.path.join(ROOT_DIR, entry, "blender_manifest.toml")
+        if os.path.isfile(manifest):
+            with open(manifest, encoding="utf-8") as f:
+                for line in f:
+                    key, _, value = line.partition("=")
+                    if key.strip() == "id":
+                        return os.path.join(ROOT_DIR, entry), value.strip().strip('"')
+    raise SystemExit("no add-on folder with blender_manifest.toml found in " + ROOT_DIR)
+
+
+ADDON_DIR, PACKAGE = _find_addon()
 OUT_DIR = os.path.join(TESTS_DIR, "_out")
 # Private temp directory for the Blender subprocesses: a crash writes blender.crash.txt
 # (and other temp files) here instead of overwriting the user's %TEMP%.
@@ -86,7 +106,7 @@ def run_blender(exe, args, timeout):
     repo_dir = os.path.join(OUT_DIR, "repo_" + label)
     json_path = os.path.join(OUT_DIR, "results_" + label + ".json")
     shutil.rmtree(repo_dir, ignore_errors=True)
-    shutil.copytree(ADDON_DIR, os.path.join(repo_dir, "snapsplit"),
+    shutil.copytree(ADDON_DIR, os.path.join(repo_dir, PACKAGE),
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     if os.path.exists(json_path):
         os.remove(json_path)
@@ -96,6 +116,7 @@ def run_blender(exe, args, timeout):
         "--python", to_exe_path(os.path.join(TESTS_DIR, "blender_runner.py"), exe),
         "--",
         "--repo", to_exe_path(repo_dir, exe),
+        "--package", PACKAGE,
         "--cases", to_exe_path(os.path.join(TESTS_DIR, "cases"), exe),
         "--out", to_exe_path(json_path, exe),
     ]
@@ -124,7 +145,8 @@ def run_blender(exe, args, timeout):
             "tmp": to_exe_path(TMP_DIR, exe)}
 
 
-GUI_SCENARIOS = ("qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
+GUI_SCENARIOS = ("p1_adjust_plane", "p1_panel",
+                 "qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
                  "adjust_undo_wheel", "conn_undo", "load_adjust", "load_conn")
 GUI_SHOTS_DIR = os.path.join(OUT_DIR, "gui")
 
@@ -137,7 +159,7 @@ def run_gui(exe, scenario, timeout):
     log_path = os.path.join(OUT_DIR, f"gui_{scenario}_{label}.log")
     crash_path = os.path.join(TMP_DIR, "blender.crash.txt")
     shutil.rmtree(repo_dir, ignore_errors=True)
-    shutil.copytree(ADDON_DIR, os.path.join(repo_dir, "snapsplit"),
+    shutil.copytree(ADDON_DIR, os.path.join(repo_dir, PACKAGE),
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for path in (json_path, crash_path):
         if os.path.exists(path):
@@ -147,6 +169,7 @@ def run_gui(exe, scenario, timeout):
         "--python", to_exe_path(os.path.join(TESTS_DIR, "gui", "gui_runner.py"), exe),
         "--",
         "--repo", to_exe_path(repo_dir, exe),
+        "--package", PACKAGE,
         "--scenario", scenario,
         "--out", to_exe_path(json_path, exe),
         "--shots", to_exe_path(GUI_SHOTS_DIR, exe),
@@ -199,6 +222,10 @@ def main():
     ap.add_argument("--gui", action="store_true",
                     help="Also run the tests/gui scenarios (opens Blender windows with simulated "
                          "input; do not touch them while they run).")
+    ap.add_argument("--gui-scenario", action="append", default=[], metavar="NAME",
+                    help="With --gui: run only these scenarios (repeatable; default: all).")
+    ap.add_argument("--gui-only", action="store_true",
+                    help="With --gui: skip the headless cases.")
     args = ap.parse_args()
 
     exes = args.blender or [BL45, BL52]
@@ -208,7 +235,7 @@ def main():
         return 2
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    runs = [run_blender(exe, args, args.timeout) for exe in exes]
+    runs = [] if (args.gui and args.gui_only) else [run_blender(exe, args, args.timeout) for exe in exes]
 
     ok = True
     print("\n=== Summary")
@@ -240,8 +267,8 @@ def main():
         print("\n=== GUI scenarios (tests/gui/gui_runner.py)")
         for exe in exes:
             print(label_for(exe))
-            for scenario in GUI_SCENARIOS:
-                gui_ok, lines = run_gui(exe, scenario, min(args.timeout, 300.0))
+            for scenario in (args.gui_scenario or GUI_SCENARIOS):
+                gui_ok, lines = run_gui(exe, scenario, min(args.timeout, 400.0))
                 ok = ok and gui_ok
                 print("\n".join(lines), flush=True)
     print("RESULT: " + ("PASS" if ok else "FAIL"))

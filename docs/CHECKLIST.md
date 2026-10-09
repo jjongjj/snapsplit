@@ -31,32 +31,49 @@
 
 ## Phase 1 — MVP: 평면 컷 스택 + Build + 핀/소켓 + Export
 
-- [ ] **P1-1 core/units.py**: `mm_to_scene`/`scene_to_mm`가 `scale_length`와 `length_unit`(mm/cm/m/inch) 전부 반영.
+식별자(2026-10-09 사용자 결정, PLAN 상단): 새 타입·오퍼레이터는 `SPLITFORGE_*` / `splitforge.*`, 스택 `Object.splitforge_stack`,
+전역 설정 `Scene.splitforge`, 파트 프로퍼티 `["splitforge_source"]`·`["splitforge_cut_ids"]`, 결과 컬렉션 `SplitForge_Build_<obj>`,
+패키지 폴더 `splitforge/`(이름은 `splitforge/core/naming.py`에 중앙화). 레거시 `snapsplit.*`·`Scene.snapsplit`는 유지.
+
+- [x] **P1-1 core/units.py**: `mm_to_scene`/`scene_to_mm`가 `scale_length`와 `length_unit`(mm/cm/m/inch) 전부 반영.
   검증: `test_units.py` 확장 — mm 씬 1.0, m 씬(scale 1) 0.001, cm 씬 0.1, scale_length 0.001+m 씬 1.0, imperial inch 1/25.4 (허용 1e-9). PASS.
-- [ ] **P1-2 core/validate.py**: `validate(obj) -> ValidationReport(manifold, loose_geom, transform_applied, unit_is_mm, messages)`.
+  결과(2026-10-09, feat/p1-mvp2): PASS 4.5/5.2(+ ADAPTIVE·NONE 케이스). `scale_length`는 float32라 7자리 유효숫자로 반올림(0.001 → 0.0010000000475 보정). **사용자 결정 필요**: 이 규약(1 BU = length_unit × scale_length)은 Blender 자체 표시(1 BU = scale_length m)와 Meters 외에는 다르다(mm+1.0 씬에서 40 BU 큐브가 N 패널에 40000 mm로 표시).
+- [x] **P1-2 core/validate.py**: `validate(obj) -> ValidationReport(manifold, loose_geom, transform_applied, unit_is_mm, messages)`.
   검증: `test_validate.py` — 큐브 OK; 면 하나 삭제한 큐브 `manifold=False`; scale 2 큐브 `transform_applied=False`; m 씬 `unit_is_mm=False`. PASS.
-- [ ] **P1-3 model/props.py**: `SNAP_PG_Connector`, `SNAP_PG_Cut`, `SNAP_PG_CutStack` 등록, `Object.snapsplit_stack`.
+  결과: PASS 4.5/5.2(+ 느슨한 정점 `loose_geom`, 위치만 이동한 큐브는 transform OK, 비메시 오브젝트).
+- [x] **P1-3 model/props.py**: `SPLITFORGE_PG_Connector`, `SPLITFORGE_PG_Cut`, `SPLITFORGE_PG_CutStack`(+ `SPLITFORGE_PG_Settings`) 등록, `Object.splitforge_stack`.
   검증: `test_model.py` — 큐브에 컷 2개·커넥터 3개 추가 → `.blend` 저장 → `wm.open_mainfile` 후 값 동일. 등록/해제 반복 3회 예외 없음. PASS.
-- [ ] **P1-4 스택 오퍼레이터**: `stack_add_plane`, `stack_remove`, `stack_move`, `stack_duplicate`, `stack_clear`, `cut_adjust_plane`(모달, headless는 execute 경로로 origin/normal 직접 지정).
+  결과: PASS 4.5/5.2. 이름은 `SPLITFORGE_PG_*`. P1에서 쓰지 않는 필드(`scale`, `custom_object`, `double_sided`, `points`, `target_part`, `seam_cache`, `kind`의 STROKE 등)는 아직 없음 — 해당 Phase(2·3)에서 추가(빈 필드를 미리 두지 않음).
+- [x] **P1-4 스택 오퍼레이터**: `stack_add_plane`, `stack_remove`, `stack_move`, `stack_duplicate`, `stack_clear`, `cut_adjust_plane`(모달, headless는 execute 경로로 origin/normal 직접 지정).
   검증: `test_stack_ops.py` — add 3회 → len 3; move(1→0) 순서 반영; remove → 2; clear → 0. 각 호출 후 `bpy.ops.ed.undo()`로 되돌리면 직전 상태(undo 스택 동작, headless에서 `undo_push` 사용). PASS.
-- [ ] **P1-5 cuts/plane.py + core/meshlib.py**: 임의 origin/normal 평면 bisect(±gap/2) + 캡(기존 `cap_single_object_hollow_style` 이관, 축 의존 제거 → 컷 법선 사용).
+  결과: PASS 4.5/5.2(`test_stack_ops`: add 3·move·duplicate·remove·clear 각각 undo/redo, `cut_adjust_plane` execute 경로; `test_cut_adjust_modal`: 모달 휠/X/Esc/확정, undo 후 live 데이터 기록, 구조체 캐시 없음). 실제 Ctrl+Z는 GUI `p1_adjust_plane`·`p1_panel` PASS.
+- [x] **P1-5 cuts/plane.py + core/meshlib.py**: 임의 origin/normal 평면 bisect(±gap/2) + 캡(기존 `cap_single_object_hollow_style` 이관, 축 의존 제거 → 컷 법선 사용).
   검증: `test_plane_cut.py` — 큐브 40mm, 법선 (1,1,0) 정규화 평면, gap 0.4mm → 두 파트 매니폴드, 부피 합 = 원본 − 갭 부피(허용 2%); 중공 박스(벽 2mm)도 두 파트 매니폴드, 캡이 링 형태(면 수 > 단순 n-gon 2개). PASS.
-- [ ] **P1-6 cuts/build.py + `snapsplit.build`**: 원본 복사 → 활성 컷 순차 적용 → 결과 컬렉션 `SnapSplit_Build_<obj>`(재빌드 시 교체) → 원본 `hide_set(True)`만, 데이터 불변.
-  검증: `test_build.py` — 컷 2개(Z, X) 빌드 → 파트 4개, 전부 매니폴드; 원본 메시 해시(정점 좌표 sha256) 빌드 전후 동일; 컷 1개 `enabled=False` 후 재빌드 → 파트 2개, 컬렉션 수 증가 없음; 각 파트 `["snapsplit_source"]==원본 이름`. PASS.
-- [ ] **P1-7 Easy 모드**: `snapsplit.easy_cut(axis, offset_mm)` → 스택 1개 + 즉시 빌드.
+  결과: PASS 4.5/5.2. 기존 레거시 캡 함수를 옮기는 대신 WIP의 bmesh 전용 `cap_plane`을 검토 후 사용 + 면 winding으로 외곽/구멍 판정(겹친 별도 셸 Suzanne 눈이 구멍으로 처리돼 부피 4% 손실하던 버그를 `test_build_monkey`가 잡음).
+- [x] **P1-6 cuts/build.py + `splitforge.build`**: 원본 복사 → 활성 컷 순차 적용 → 결과 컬렉션 `SplitForge_Build_<obj>`(재빌드 시 교체) → 원본 `hide_set(True)`만, 데이터 불변.
+  검증: `test_build.py` — 컷 2개(Z, X) 빌드 → 파트 4개, 전부 매니폴드; 원본 메시 해시(정점 좌표 sha256) 빌드 전후 동일; 컷 1개 `enabled=False` 후 재빌드 → 파트 2개, 컬렉션 수 증가 없음; 각 파트 `["splitforge_source"]==원본 이름`. PASS.
+  결과: PASS 4.5/5.2(+ 회전·비균일 스케일·모디파이어 원본, 결과 컬렉션 제외 후 재빌드, 원본 이름 변경, 원본 복제, Edit 모드 poll, clear_build).
+- [x] **P1-7 Easy 모드**: `splitforge.easy_cut(axis, offset_mm)` → 스택 1개 + 즉시 빌드.
   검증: `test_easy.py` — 큐브에 호출 → 파트 2개, `obj.snapsplit_stack.cuts` len 1. PASS.
-- [ ] **P1-8 connectors/placement.py**: 시임 프레임(origin, normal, tangent) + (u,v,rot) → 월드 행렬. 단일 함수가 자동/클릭/프리뷰 모두에 쓰임.
-  검증: `test_placement.py` — 단위 프레임에서 (u=5,v=0) → 월드 x=5; 프레임 회전 90° → 대응 좌표. 자동 LINE 3개·margin 10% 위치가 시임 폭 내부. PASS. `grep -rn "def distribute_points" snapsplit/connectors | wc -l` → `1`.
-- [ ] **P1-9 connectors/apply.py (핀/소켓)**: CYL_PIN·RECT_TENON에 대해 핀 UNION(pin_side 파트), 소켓 DIFFERENCE(반대 파트, 반경+클리어런스, 깊이+클리어런스). 컷당 커넥터 N개를 커터 join 후 **파트당 불리언 1회**.
+  결과: PASS 4.5/5.2(기본 커넥터 2개, 커넥터 0개, 오브젝트 밖 컷은 흔적 없이 실패, 패널 invoke는 Easy 설정 사용). Easy 컷을 반복하면 스택에 누적되어 전체가 다시 빌드됨(의도된 동작으로 둠).
+- [x] **P1-8 connectors/placement.py**: 시임 프레임(origin, normal, tangent) + (u,v,rot) → 월드 행렬. 단일 함수가 자동/클릭/프리뷰 모두에 쓰임.
+  검증: `test_placement.py` — 단위 프레임에서 (u=5,v=0) → 월드 x=5; 프레임 회전 90° → 대응 좌표. 자동 LINE 3개·margin 10% 위치가 시임 폭 내부. PASS. `grep -rn "def distribute_points" splitforge/connectors | wc -l` → `1`.
+  결과: PASS 4.5/5.2. 자동 배치는 **시임 영역별**: 다른 컷이 시임을 나누면 영역마다 count개(다른 컷 평면 위에 커넥터가 놓이던 문제를 GUI에서 발견해 수정).
+- [x] **P1-9 connectors/apply.py (핀/소켓)**: CYL_PIN·RECT_TENON에 대해 핀 UNION(pin_side 파트), 소켓 DIFFERENCE(반대 파트, 반경+클리어런스, 깊이+클리어런스). 컷당 커넥터 N개를 커터 join 후 **파트당 불리언 1회**.
   검증: `test_connectors_build.py` — 큐브 Z컷 + CYL_PIN 3개 빌드 → 양 파트 매니폴드, 핀 파트 부피 > 반쪽 부피, 소켓 파트 부피 < 반쪽 부피; `pin_side` 바꾸면 반대. 클리어런스 0.3mm 시 소켓 지름 = 핀 지름+0.6 (단면 bbox로 측정, 허용 0.02mm). PASS.
-- [ ] **P1-10 연속 컷 + 커넥터**: 컷 2개 모두 커넥터 2개씩 → 빌드.
+  결과: PASS 4.5/5.2(소켓 지름 5.6±0.02, 깊이 5.3, RECT_TENON 6.5×4.5, gap 1 mm, 겹친 커넥터, 불리언 호출 수 = 파트당 UNION 1·DIFFERENCE 1).
+- [x] **P1-10 연속 컷 + 커넥터**: 컷 2개 모두 커넥터 2개씩 → 빌드.
   검증: `test_build_multi.py` — 파트 4개 전부 매니폴드, 재빌드 2회 반복 후 `bpy.data.objects` 수 동일(누수 없음), `bpy.data.meshes` 중 고아(users==0) 0개. PASS.
-- [ ] **P1-11 Export**: `snapsplit.export_parts(directory, formats={STL,OBJ,FBX}, apply_scale_mm=True)`.
+  결과: PASS 4.5/5.2. 커넥터 8개 모두 적용됐는지 부피 합으로 검증(이전 버전은 건너뛴 커넥터를 놓쳤음).
+- [x] **P1-11 Export**: `splitforge.export_parts(directory, formats={STL,OBJ,FBX}, apply_scale_mm=True)`.
   검증: `test_export.py` — 파트 2개 빌드 후 임시 폴더로 STL+OBJ 내보내기 → 파일 4개 존재, 각 >1KB; STL 재임포트 시 면 수 동일. PASS (4.5/5.2 모두; 5.x에서 OBJ/STL 오퍼레이터 ID 차이 `compat.py`로 흡수).
-- [ ] **P1-12 UI 패널(Draft/Easy, Cuts UIList, Connectors UIList, Build/Export)**.
-  검증: `test_ui_draw.py` — `bpy.types.SNAPSPLIT_PT_main.draw`를 `temp_override`로 호출(dummy layout) 예외 없음. GUI: 패널에 컷 추가/삭제/활성 토글/Build/Export 조작 가능, 스크린샷 `docs/qa/p1_panel_<ver>.png`.
-- [ ] **P1-13 회귀**: 레거시 케이스(P0-5) 포함 전체 PASS, 두 버전.
+  결과: PASS 4.5/5.2(+ FBX를 미터 씬에 임포트해 실제 단위 확인, cm 씬→mm STL, 숨긴 파트 제외, 저장 안 된 파일의 상대 경로 거부).
+- [x] **P1-12 UI 패널(Draft/Easy, Cuts UIList, Connectors UIList, Build/Export)**.
+  검증: `test_ui_draw.py` — `bpy.types.SPLITFORGE_PT_main.draw`(+ 서브패널, 레거시 `SNAP_PT_panel`)를 `temp_override`로 호출(dummy layout) 예외 없음. GUI: 패널에 컷 추가/삭제/활성 토글/Build/Export 조작 가능, 스크린샷 `docs/qa/p1_panel_<ver>.png`.
+  결과: `test_ui_draw` PASS 4.5/5.2. GUI: `python3 tests/run_tests.py --gui`의 `p1_panel`(실제 버튼 클릭)·`p1_adjust_plane` PASS 4.5/5.2. 스크린샷 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png), 모달 [4.5](qa/p1_adjust_plane_4.5.png) [5.2](qa/p1_adjust_plane_5.2.png).
+- [x] **P1-13 회귀**: 레거시 케이스(P0-5) 포함 전체 PASS, 두 버전.
   검증: `python3 tests/run_tests.py` exit 0.
+  결과: 헤드리스 24/24 PASS ×2회(4.5/5.2), `--gui` 10개 시나리오 PASS(4.5/5.2), `--slow --case test_perf_large` PASS(5.2: split 4.87 s, connectors 14.11 s, 새 Build 9.27 s).
 
 ## Phase 2 — 곡선 컷 + 불리언 폴백 + 진행률
 
