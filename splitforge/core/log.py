@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# This file is part of SnapSplit.
+# This file is part of SplitForge (fork of SnapSplit by Christoph Medicus).
 
 # core/log.py
 """Add-on logger.
@@ -13,14 +13,16 @@ import sys
 
 import bpy
 
-# Package of the add-on itself ("snapsplit" or "bl_ext.<repo>.snapsplit")
+from .naming import ADDON_NAME
+
+# Package of the add-on itself (e.g. "bl_ext.<repo>.splitforge")
 ADDON_PACKAGE = __package__.rpartition(".")[0]
 
 _logger = logging.getLogger(ADDON_PACKAGE)
 _logger.propagate = False
 if not _logger.handlers:
     _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("[SnapSplit %(levelname)s] %(message)s"))
+    _handler.setFormatter(logging.Formatter(f"[{ADDON_NAME} %(levelname)s] %(message)s"))
     _logger.addHandler(_handler)
 _logger.setLevel(logging.INFO)
 

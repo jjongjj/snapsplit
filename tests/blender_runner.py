@@ -3,7 +3,7 @@
 """In-Blender test runner (started by tests/run_tests.py).
 
 blender -b --factory-startup --python blender_runner.py -- \
-    --repo <dir containing snapsplit/> --cases <dir> --out <json> [--case PATTERN]... [--slow]
+    --repo <dir containing the package> --package NAME --cases <dir> --out <json> [--case PATTERN]... [--slow]
 
 Registers <repo> as a local extension repository, enables the add-on, runs every
 selected ``tests/cases/test_*.py`` (each defines ``run(ctx)``) in a fresh empty
@@ -22,8 +22,8 @@ import traceback
 
 import bpy
 
-REPO_NAME = "snapsplit_test"
-ADDON_MODULE = f"bl_ext.{REPO_NAME}.snapsplit"
+REPO_NAME = "splitforge_test"
+ADDON_MODULE = None  # bl_ext.<REPO_NAME>.<package>, set in main()
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if TESTS_DIR not in sys.path:
@@ -54,6 +54,7 @@ def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     ap = argparse.ArgumentParser(prog="blender_runner.py")
     ap.add_argument("--repo", required=True)
+    ap.add_argument("--package", default="splitforge")
     ap.add_argument("--cases", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--case", action="append", default=[])
@@ -82,7 +83,7 @@ def reset_scene():
 
 def load_case(path):
     name = os.path.splitext(os.path.basename(path))[0]
-    spec = importlib.util.spec_from_file_location(f"snapsplit_case_{name}", path)
+    spec = importlib.util.spec_from_file_location(f"splitforge_case_{name}", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -98,7 +99,9 @@ def select_cases(cases_dir, patterns):
 
 
 def main():
+    global ADDON_MODULE
     args = parse_args()
+    ADDON_MODULE = f"bl_ext.{REPO_NAME}.{args.package}"
     report = {"blender": bpy.app.version_string, "tempdir": bpy.app.tempdir,
               "cases": [], "notes": []}
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""debug_log (default off) controls the [SnapSplit DEBUG] output of the legacy split."""
+"""debug_log (default off) controls the [<AddonName> DEBUG] output of the legacy split."""
 
 import io
 import logging
@@ -38,7 +38,8 @@ def run(ctx):
         out = _split_and_capture(ctx, handlers[0])
     finally:
         prefs.debug_log = False
-    assert "[SnapSplit DEBUG] ---- cap_single_object_hollow_style:" in out, out[:2000]
+    name = ctx.module("core.naming").ADDON_NAME
+    assert f"[{name} DEBUG] ---- cap_single_object_hollow_style:" in out, out[:2000]
 
     out = _split_and_capture(ctx, handlers[0])
     assert "DEBUG" not in out, out

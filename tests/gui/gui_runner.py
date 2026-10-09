@@ -3,7 +3,7 @@
 """GUI scenario runner for modal operators (started by ``tests/run_tests.py --gui``).
 
 blender --factory-startup --enable-event-simulate --python gui_runner.py -- \
-    --repo <dir containing snapsplit/> --scenario NAME --out <json> --shots <dir> --label <str>
+    --repo <dir containing the package> --package NAME --scenario NAME --out <json> --shots <dir> --label <str>
 
 Modal operators only run in a real window, so these scenarios start a GUI Blender
 (with simulated input, real input is blocked) and drive it step by step from a
@@ -49,17 +49,18 @@ import bpy
 from bpy_extras import view3d_utils
 from mathutils import Euler, Vector
 
-REPO_NAME = "snapsplit_gui_test"
-ADDON = f"bl_ext.{REPO_NAME}.snapsplit"
+REPO_NAME = "splitforge_gui_test"
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 ap = argparse.ArgumentParser(prog="gui_runner.py")
 ap.add_argument("--repo", required=True)
+ap.add_argument("--package", default="splitforge")
 ap.add_argument("--scenario", required=True)
 ap.add_argument("--out", required=True)
 ap.add_argument("--shots", default="")
 ap.add_argument("--label", default="")
 ARGS = ap.parse_args(argv)
+ADDON = f"bl_ext.{REPO_NAME}.{ARGS.package}"
 
 REPORT = {"blender": bpy.app.version_string, "scenario": ARGS.scenario,
           "tempdir": bpy.app.tempdir, "checks": [], "log": [], "screenshots": [],
