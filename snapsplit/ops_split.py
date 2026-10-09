@@ -36,6 +36,7 @@ from .utils import (
 )
 
 from .utils import _trf
+from .core import log
 
 # Import translation helper
 # 'tr' resolves UI strings from a central language dictionary.
@@ -825,7 +826,7 @@ def _recalc_normals_outside(obj):
                 bm.free()
             obj.data.update()
     except Exception as ex:
-        print(f"[SnapSplit DEBUG] _recalc_normals_outside failed on '{getattr(obj, 'name', '?')}': {ex}")
+        log.debug(f"_recalc_normals_outside failed on '{getattr(obj, 'name', '?')}': {ex}")
 
 def robust_prepare_hollow(obj, operator=None):
     """Normalize 'hollow' preparation: apply hollow-like modifiers or join detected inner/outer shell; return (obj, used_hollow)."""
@@ -979,8 +980,8 @@ def _group_loops_by_nesting(loops, ax):
             edges += infos[k]['edges']
         expected = info['area'] - sum(infos[k]['area'] for k in holes)
         groups.append({'edges': edges, 'n_holes': len(holes), 'expected_area': expected})
-        print(f"[SnapSplit DEBUG]   nesting: outer loop #{j} (area={info['area']:.5f}) "
-              f"with {len(holes)} hole(s), expected cap area={expected:.5f}")
+        log.debug(f"  nesting: outer loop #{j} (area={info['area']:.5f}) "
+                  f"with {len(holes)} hole(s), expected cap area={expected:.5f}")
     return groups
 
 
@@ -1002,24 +1003,24 @@ def _fill_nested_group_bmesh(bm, edges, n_plane, n_holes, expected_area):
         try:
             res = bmesh.ops.triangle_fill(bm, edges=edges, **kwargs)
         except Exception as ex:
-            print(f"[SnapSplit DEBUG]     triangle_fill variant {vi} raised: {ex}")
+            log.debug(f"    triangle_fill variant {vi} raised: {ex}")
             continue
         faces = [g for g in res.get('geom', []) if isinstance(g, bmesh.types.BMFace)]
         if not faces:
-            print(f"[SnapSplit DEBUG]     triangle_fill variant {vi}: no faces created")
+            log.debug(f"    triangle_fill variant {vi}: no faces created")
             continue
         area = sum(f.calc_area() for f in faces)
         if expected_area is None or abs(area - expected_area) <= max(0.02 * abs(expected_area), 1e-12):
-            print(f"[SnapSplit DEBUG]     triangle_fill variant {vi} OK: {len(faces)} face(s), area={area:.5f}")
+            log.debug(f"    triangle_fill variant {vi} OK: {len(faces)} face(s), area={area:.5f}")
             return True
-        print(f"[SnapSplit DEBUG]     triangle_fill variant {vi} REJECTED: area={area:.5f} "
-              f"but expected {expected_area:.5f} (a hole was probably filled) -> removing faces")
+        log.debug(f"    triangle_fill variant {vi} REJECTED: area={area:.5f} "
+                  f"but expected {expected_area:.5f} (a hole was probably filled) -> removing faces")
         try:
             # context='FACES' also removes the diagonal edges created by the fill;
             # the loop edges survive because they still belong to the wall faces.
             bmesh.ops.delete(bm, geom=faces, context='FACES')
         except Exception as ex:
-            print(f"[SnapSplit DEBUG]     could not remove rejected faces: {ex}")
+            log.debug(f"    could not remove rejected faces: {ex}")
             return False
 
     if n_holes == 1:
@@ -1027,10 +1028,10 @@ def _fill_nested_group_bmesh(bm, edges, n_plane, n_holes, expected_area):
             res = bmesh.ops.bridge_loops(bm, edges=edges, use_pairs=False, use_cyclic=False,
                                          use_merge=False, merge_factor=0.5, twist_offset=0)
             if res.get('faces'):
-                print(f"[SnapSplit DEBUG]     bridge_loops fallback OK: {len(res['faces'])} face(s)")
+                log.debug(f"    bridge_loops fallback OK: {len(res['faces'])} face(s)")
                 return True
         except Exception as ex:
-            print(f"[SnapSplit DEBUG]     bridge_loops fallback raised: {ex}")
+            log.debug(f"    bridge_loops fallback raised: {ex}")
 
     print("[SnapSplit][INFO]     group left OPEN (no fill variant produced a correct ring cap)")
     return False
@@ -1055,7 +1056,7 @@ def _fill_edges_bmesh(bm, edges, prefer_ngon=False, normal=None):
             if [f for f in res.get('faces', []) if f.is_valid]:
                 return True
         except Exception as ex:
-            print(f"[SnapSplit DEBUG]   contextual_create raised: {ex}")
+            log.debug(f"  contextual_create raised: {ex}")
 
     variants = [dict(use_beauty=True, use_dissolve=False)]
     if normal is not None:
@@ -1064,7 +1065,7 @@ def _fill_edges_bmesh(bm, edges, prefer_ngon=False, normal=None):
         try:
             res = bmesh.ops.triangle_fill(bm, edges=edges, **kwargs)
         except Exception as ex:
-            print(f"[SnapSplit DEBUG]   triangle_fill raised: {ex}")
+            log.debug(f"  triangle_fill raised: {ex}")
             continue
         if [g for g in res.get('geom', []) if isinstance(g, bmesh.types.BMFace)]:
             return True
@@ -1427,7 +1428,7 @@ def cap_single_object_hollow_style(obj) -> bool:
     Step 1a/1b: the final select_all + normals_make_consistent operators were
     replaced by bmesh.ops.recalc_face_normals on the edit BMesh.
     """
-    print(f"[SnapSplit DEBUG] ---- cap_single_object_hollow_style: {obj.name} ----")
+    log.debug(f"---- cap_single_object_hollow_style: {obj.name} ----")
     _enter_edit_mode_edges(obj)
     bm = bmesh.from_edit_mesh(obj.data)
     bm.verts.ensure_lookup_table(); bm.edges.ensure_lookup_table(); bm.faces.ensure_lookup_table()
@@ -1436,7 +1437,7 @@ def cap_single_object_hollow_style(obj) -> bool:
     try:
         # Boundary vertex dedupe (unchanged from current version)
         boundary_verts = [v for v in bm.verts if any(e.is_boundary for e in v.link_edges)]
-        print(f"[SnapSplit DEBUG] boundary verts before dedupe: {len(boundary_verts)}")
+        log.debug(f"boundary verts before dedupe: {len(boundary_verts)}")
         if boundary_verts:
             try:
                 dist = _diag_eps(obj, k=3e-6, min_eps=3e-7)
@@ -1444,10 +1445,10 @@ def cap_single_object_hollow_style(obj) -> bool:
                 bmesh.update_edit_mesh(obj.data)
                 bm.verts.ensure_lookup_table(); bm.edges.ensure_lookup_table(); bm.faces.ensure_lookup_table()
                 boundary_verts_after = [v for v in bm.verts if any(e.is_boundary for e in v.link_edges)]
-                print(f"[SnapSplit DEBUG] boundary vertex dedupe: dist={dist:.6g}, "
-                      f"boundary verts after={len(boundary_verts_after)}")
+                log.debug(f"boundary vertex dedupe: dist={dist:.6g}, "
+                          f"boundary verts after={len(boundary_verts_after)}")
             except Exception as ex:
-                print(f"[SnapSplit DEBUG] remove_doubles on boundary verts raised: {ex}")
+                log.debug(f"remove_doubles on boundary verts raised: {ex}")
 
         props = getattr(bpy.context.scene, "snapsplit", None)
         plane_axis = props.split_axis if props else "Z"
@@ -1457,9 +1458,9 @@ def cap_single_object_hollow_style(obj) -> bool:
         split_no = axis_vecs[ax].normalized()
 
         cand = [e for e in bm.edges if e.is_boundary]
-        print(f"[SnapSplit DEBUG] total boundary edges (no direction filter): {len(cand)}")
+        log.debug(f"total boundary edges (no direction filter): {len(cand)}")
         if not cand:
-            print("[SnapSplit DEBUG] no candidate edges found -> abort")
+            log.debug("no candidate edges found -> abort")
             return False
 
         # ------------------------------------------------------------------
@@ -1480,7 +1481,7 @@ def cap_single_object_hollow_style(obj) -> bool:
                 for v in e.verts:
                     degree[v] = degree.get(v, 0) + 1
             dangling = [v for v, d in degree.items() if d % 2 == 1]
-            print(f"[SnapSplit DEBUG]   dangling endpoints (global): {len(dangling)}")
+            log.debug(f"  dangling endpoints (global): {len(dangling)}")
             if len(dangling) < 2:
                 return edges
 
@@ -1510,8 +1511,8 @@ def cap_single_object_hollow_style(obj) -> bool:
             lens = [(e.verts[0].co - e.verts[1].co).length for e in edges]
             min_len = min(lens) if lens else 0.0
             max_stitch = max(min_len * 0.5, 1e-9)
-            print(f"[SnapSplit DEBUG]   stitch safety threshold: {max_stitch:.6g} "
-                  f"(global min boundary edge length: {min_len:.6g})")
+            log.debug(f"  stitch safety threshold: {max_stitch:.6g} "
+                      f"(global min boundary edge length: {min_len:.6g})")
 
             new_edges = list(edges)
             n_stitched = 0
@@ -1522,8 +1523,8 @@ def cap_single_object_hollow_style(obj) -> bool:
                     new_e = existing if existing is not None else bmesh_ref.edges.new((v, w))
                     new_edges.append(new_e)
                     n_stitched += 1
-            print(f"[SnapSplit DEBUG]   stitched {n_stitched} gap(s), "
-                  f"rejected {len(pairs) - n_stitched} pair(s) as too far")
+            log.debug(f"  stitched {n_stitched} gap(s), "
+                      f"rejected {len(pairs) - n_stitched} pair(s) as too far")
             bmesh_ref.edges.ensure_lookup_table()
             return new_edges
 
@@ -1646,11 +1647,11 @@ def cap_single_object_hollow_style(obj) -> bool:
         eps_plane_loop = _diag_eps(obj, k=8e-6, min_eps=8e-7)
 
         cycles, open_chains, leftover = _decompose_all_into_loops_and_chains_local(cand)
-        print(f"[SnapSplit DEBUG] global decomposition: {len(cycles)} closed cycle(s), "
-              f"{len(open_chains)} open chain(s), leftover edges={leftover}")
+        log.debug(f"global decomposition: {len(cycles)} closed cycle(s), "
+                  f"{len(open_chains)} open chain(s), leftover edges={leftover}")
         if leftover:
-            print(f"[SnapSplit DEBUG] WARNING: {leftover} boundary edge(s) could not be "
-                  f"resolved into cycles or chains (decomposition guard limit hit)")
+            log.debug(f"WARNING: {leftover} boundary edge(s) could not be "
+                      f"resolved into cycles or chains (decomposition guard limit hit)")
 
         # Open chains can never be capped (no closed loop exists) -- report
         # explicitly instead of letting them vanish silently. This is the
@@ -1679,8 +1680,8 @@ def cap_single_object_hollow_style(obj) -> bool:
             per = _perimeter_local(cy)
             if extent <= eps_plane_loop:
                 planar_loops.append({'edges': cy, 'coord': avg_coord})
-                print(f"[SnapSplit DEBUG] closed cycle: {len(cy)} edge(s), perimeter={per:.4f}, "
-                      f"extent along axis={extent:.6g} -> PLANAR, kept for capping")
+                log.debug(f"closed cycle: {len(cy)} edge(s), perimeter={per:.4f}, "
+                          f"extent along axis={extent:.6g} -> PLANAR, kept for capping")
             else:
                 print(f"[SnapSplit][INFO] closed cycle: {len(cy)} edge(s), perimeter={per:.4f}, "
                       f"extent along axis={extent:.6g} (threshold={eps_plane_loop:.6g}) -> "
@@ -1688,7 +1689,7 @@ def cap_single_object_hollow_style(obj) -> bool:
                       f"(likely rim of a pre-existing wall opening rather than the cut plane)")
 
         if not planar_loops:
-            print("[SnapSplit DEBUG] no planar closed loops found -> nothing to cap")
+            log.debug("no planar closed loops found -> nothing to cap")
             return False
 
         # Group surviving planar loops into cut-plane buckets by position,
@@ -1705,19 +1706,19 @@ def cap_single_object_hollow_style(obj) -> bool:
                     break
             if not matched:
                 buckets.append({'v': pl['coord'], 'loops': [pl['edges']]})
-        print(f"[SnapSplit DEBUG] {len(buckets)} cut-plane bucket(s) from planar loops "
-              f"(eps_plane={eps_plane:.6g}):")
+        log.debug(f"{len(buckets)} cut-plane bucket(s) from planar loops "
+                  f"(eps_plane={eps_plane:.6g}):")
         for i, b in enumerate(buckets):
-            print(f"[SnapSplit DEBUG]   bucket[{i}] coord~{b['v']:.5f} loop_count={len(b['loops'])}")
+            log.debug(f"  bucket[{i}] coord~{b['v']:.5f} loop_count={len(b['loops'])}")
 
         for bi, bucket in enumerate(buckets):
             loops = bucket['loops']
-            print(f"[SnapSplit DEBUG] -- filling bucket[{bi}]: {len(loops)} loop(s) --")
+            log.debug(f"-- filling bucket[{bi}]: {len(loops)} loop(s) --")
 
             # Group loops into 'outer + holes' by 2D nesting (None -> legacy behaviour)
             groups = _group_loops_by_nesting(loops, ax)
             if groups is None:
-                print("[SnapSplit DEBUG]   nesting analysis failed -> legacy single group")
+                log.debug("  nesting analysis failed -> legacy single group")
                 groups = [{'edges': [e for lp in loops for e in lp],
                            'n_holes': len(loops) - 1,
                            'expected_area': None}]
@@ -1726,18 +1727,18 @@ def cap_single_object_hollow_style(obj) -> bool:
                 g_edges = grp['edges']
 
                 if grp['n_holes'] == 0:
-                    print(f"[SnapSplit DEBUG]   group {gi}: plain loop -> BMesh fill (N-gon first)")
+                    log.debug(f"  group {gi}: plain loop -> BMesh fill (N-gon first)")
                     # No selection needed anymore: the edges are passed to the BMesh op directly
                     did = _fill_edges_bmesh(bm, g_edges, prefer_ngon=True, normal=n_plane)
                     bmesh.update_edit_mesh(obj.data)
 
                 else:
-                    print(f"[SnapSplit DEBUG]   group {gi}: outer loop + {grp['n_holes']} hole(s) "
-                          f"-> verified triangle_fill")
+                    log.debug(f"  group {gi}: outer loop + {grp['n_holes']} hole(s) "
+                              f"-> verified triangle_fill")
                     did = _fill_nested_group_bmesh(bm, g_edges, n_plane,
                                                    grp['n_holes'], grp['expected_area'])
                     bmesh.update_edit_mesh(obj.data)
-                print(f"[SnapSplit DEBUG]   group {gi} fill result: {did}")
+                log.debug(f"  group {gi} fill result: {did}")
                 any_ok = any_ok or did
 
         if any_ok:
@@ -1747,12 +1748,12 @@ def cap_single_object_hollow_style(obj) -> bool:
                 bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
                 bmesh.update_edit_mesh(obj.data)
             except Exception as ex:
-                print(f"[SnapSplit DEBUG] recalc_face_normals raised: {ex}")
+                log.debug(f"recalc_face_normals raised: {ex}")
 
         return any_ok
 
     except Exception as ex:
-        print(f"[SnapSplit DEBUG] EXCEPTION inside cap_single_object_hollow_style: {ex}")
+        log.debug(f"EXCEPTION inside cap_single_object_hollow_style: {ex}")
         raise
     finally:
         # Safety net: guarantee we always leave edit mode, even if an
@@ -1763,7 +1764,7 @@ def cap_single_object_hollow_style(obj) -> bool:
             obj.data.validate(); obj.data.update()
         except Exception:
             pass
-        print(f"[SnapSplit DEBUG] ---- cap_single_object_hollow_style: {obj.name} DONE, any_ok={any_ok} ----")
+        log.debug(f"---- cap_single_object_hollow_style: {obj.name} DONE, any_ok={any_ok} ----")
 
 # ---------------------------
 # Auto "Apply Rotation & Scale" before the planar split
@@ -2197,8 +2198,8 @@ class SNAP_OT_cap_open_seams_now(Operator):
             return walked
 
         if _ALLOW_OPS_LOOP_FALLBACK:
-            print("[SnapSplit DEBUG] edge-loop walker found no closed cycle -> "
-                  "falling back to bpy.ops.mesh.loop_multi_select for this seed")
+            log.debug("edge-loop walker found no closed cycle -> "
+                      "falling back to bpy.ops.mesh.loop_multi_select for this seed")
             return self._expand_edge_to_full_loop_ops(obj, bm, edge)
 
         # Fallback disabled: return only the seed edge (will fail the cyclic check)

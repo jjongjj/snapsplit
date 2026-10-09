@@ -25,6 +25,13 @@ import bpy
 from bpy.types import AddonPreferences
 from bpy.props import StringProperty, BoolProperty, FloatProperty
 
+from .core import log
+
+
+def _update_debug_log(self, context):
+    """Apply the debug log toggle immediately."""
+    log.set_debug(self.debug_log)
+
 class SNAPADDON_Preferences(AddonPreferences):
     """Add-on preferences for SnapSplit."""
     bl_idname = __package__  # "snapsplit"
@@ -39,12 +46,19 @@ class SNAPADDON_Preferences(AddonPreferences):
         default=True,
         description="Create a collection for parts ready to export",
     )
+    debug_log: BoolProperty(
+        name="Debug log",
+        default=False,
+        description="Print detailed debug messages to the system console",
+        update=_update_debug_log,
+    )
 
     def draw(self, context):
         """Draw the add-on preferences UI."""
         layout = self.layout
         layout.prop(self, "default_profile")
         layout.prop(self, "create_export_collection")
+        layout.prop(self, "debug_log")
 
 classes = (SNAPADDON_Preferences,)
 
@@ -52,6 +66,7 @@ def register():
     """Register add-on preferences."""
     for c in classes:
         bpy.utils.register_class(c)
+    log.sync_from_preferences()
 
 def unregister():
     """Unregister add-on preferences."""
