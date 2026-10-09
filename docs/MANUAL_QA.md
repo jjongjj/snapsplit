@@ -10,9 +10,11 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
 
 | 시나리오 | 자동으로 검증하는 것 |
 |---|---|
+| `p1_adjust_plane` | QA-5: 활성 컷 평면 gpu 오버레이가 보임(오버레이 끔 대비 주황 픽셀), `splitforge.cut_adjust_plane` 마우스 드래그로 평면이 법선 방향으로 이동, 휠 = 정확히 1 mm, 좌클릭 확정 후 **실제 Ctrl+Z / Ctrl+Shift+Z 키 이벤트**로 되돌리기·다시하기(오퍼레이터가 undo 단계 1개를 남김), X 키 축 정렬, Esc 복원, 모달 중 undo/redo 반복(크래시 회귀), 모달 중 파일 로드 → `cancel()` |
+| `p1_panel` | QA-6: 사이드바 SplitForge 탭을 클릭으로 열고, 버튼 위치를 hover 스캔(`ui.copy_python_command_button`/`copy_data_path_button`)으로 찾아 **실제 클릭**: X 컷 추가 → Ctrl+Z/Ctrl+Shift+Z, 목록 체크박스로 활성 토글, Remove, Distribute(커넥터), Build(4파트 매니폴드, 원본 숨김·불변), Export(파트당 STL), Clear Build. 스크린샷 `panel_start`·`panel_built` → `docs/qa/p1_panel_<ver>.png` |
 | `qa1_preview_color` | QA-1: 프리뷰 평면이 Solid 뷰에서 주황(스크린샷 픽셀: 프리뷰 끔 대비 따뜻한 색 픽셀 비율), 재질 `diffuse_color` 주황, 토글 반복 후 고아 메쉬 0, 끄면 평면·X-Ray 정리 |
-| `qa2_adjust` | QA-2: 마우스 드래그로 오프셋 변화 + 평면이 오프셋 위치로 이동, 좌클릭 확정(오프셋 유지·모달 종료), Enter 확정(프리뷰 끔 상태, 고아 메쉬 0), Esc 취소(메시지·평면·X-Ray 정리) |
-| `qa3_connectors` | QA-3: 위에서 본 분할 큐브에서 프리뷰가 커서를 따라감(커서 광선∩시임 위치와 일치, 위치 변화), 좌클릭 시 커서 위치에 핀(핀 쪽 부피 +, 소켓 쪽 −, 돌출 정점이 목표 위치 근처), S 후 클릭은 반대 파트에 핀, 두 파트 매니폴드, 우클릭 취소 후 프리뷰·X-Ray 정리 |
+| `qa2_adjust` | QA-2: 마우스 드래그로 오프셋 변화 + 평면이 오프셋 위치로 이동, 좌클릭 확정(오프셋 유지·모달 종료), Enter 확정(프리뷰 끔 상태, 고아 메쉬 0), Esc 취소(메시지·평면·X-Ray 정리). 비스듬한 뷰(평면이 면으로 보이게), 두 번째 확정 메시지는 그 실행 이후 출력에서만 찾음 |
+| `qa3_connectors` | QA-3: 위에서 본 분할 큐브에서 프리뷰가 커서를 따라감(커서 광선∩시임 위치와 일치, 위치 변화), 좌클릭 시 커서 위치에 핀(핀 쪽 부피 +, 소켓 쪽 −, 돌출 정점이 목표 위치 근처), S 후 클릭은 반대 파트에 핀, 두 파트 매니폴드, 우클릭 취소 후 프리뷰·X-Ray 정리. 오버레이 켜고 촬영(와이어 프리뷰는 오버레이 엔진이 그림) |
 | `qa4_freehand` | QA-4: 정면 뷰 Suzanne(머리 셸만)에 좌클릭 스트로크 → Shift 릴리스 축 스냅(평면 법선이 축과 일치) → Enter로 매니폴드 2파트, 부피 합 = 원본(±1 %), Esc는 변경 없음, 모달 중 파일 로드 시 `cancel()` 정리 |
 | `adjust_undo_wheel`, `conn_undo` | 모달 중 undo/redo(크래시 회귀), undo 직후 프리뷰 사라짐 → 다음 마우스 이동에서 재생성 |
 | `load_adjust`, `load_conn` | 모달 중 파일 로드 → `cancel()` 실행(로드 전 X-Ray 이유가 잡혀 있었고, 로드 후 해제 + 취소 메시지 출력) |
@@ -30,15 +32,39 @@ headless 테스트(`python3 tests/run_tests.py`)로 확인할 수 없는 모달�
   (headless/GUI 테스트 하니스와 같은 설정).
 - 기본 큐브를 지우고 `Add > Mesh > Cube`를 **Size 40 BU**(이 설정에서 UI에는 "40 m"로 표시됨) 또는 Suzanne(Size 40 BU,
   Edit Mode에서 `Mesh > Clean Up > Fill Holes`)로 추가해 선택한다.
-- 이유(현행 레거시 단위 규약): `utils.unit_mm()`은 Length = Millimeters **이고** Unit Scale = 1.0이면 1 BU = 1 mm로 본다
-  (그 밖의 설정은 1 BU = 1 m). 따라서 이 설정에서 큐브를 "40 mm"(= 0.04 BU)로 만들면 핀·플러그 등 mm 단위 값이
-  모델보다 1000배 크게(예: 핀 프리뷰 5 × 5 × 7.7 BU) 나온다. 기본 단위(Length = Meters, Unit Scale 1.0)에서 Size 0.04 m로
-  만드는 것도 일관되지만, 테스트와 같은 위 설정을 기본으로 한다. Unit Scale ≠ 1.0(예: 0.001)은 아직 잘못 계산된다.
-- **P1-1(`core/units.py`, `scale_length`·`length_unit` 전부 반영)이 들어오면 이 규약은 바뀐다**: 그때 "실제 40 mm" 기준으로
-  이 준비 절차를 다시 쓴다.
-- 3D 뷰포트 N 패널 > SnapSplit 탭을 연다. 콘솔(Window > Toggle System Console)을 켜 두고 오류를 확인한다.
+- 단위 규약(P1-1 `core/units.py`, 레거시 `utils.unit_mm()`도 이것을 쓴다): **1 BU = 1 `length_unit` × `scale_length`**.
+  Millimeters + Unit Scale 1.0 → 1 BU = 1 mm, Meters + 0.001 → 1 mm, Centimeters + 1.0 → 10 mm, Inches → 25.4 mm.
+  주의: Blender 자신의 길이 표시는 1 BU = `scale_length` m로 계산하므로 위 준비(Millimeters, 1.0)에서 40 BU 큐브는
+  N 패널에 "40000 mm"로 표시된다(애드온·STL 기준으로는 40 mm). 이 차이는 사용자 결정 대상이다(체크리스트 P1-1 메모).
+- 3D 뷰포트 N 패널 > **SplitForge** 탭을 연다(새 Draft/Easy 패널; 레거시 SnapSplit UI는 맨 아래 접힌 "Legacy" 서브패널).
+  콘솔(Window > Toggle System Console)을 켜 두고 오류를 확인한다.
 
 ---
+
+## QA-5 컷 평면 모달 조정 (`splitforge.cut_adjust_plane`, P1-4/P1-12 GUI)
+
+절차:
+1. 큐브 선택, SplitForge 패널 Draft 모드에서 컷 목록 옆 **Z** 버튼으로 컷 추가. 주황 반투명 사각형(활성 컷)이 큐브 중앙에 보인다.
+2. "Adjust in Viewport"를 누르고 마우스를 위아래로 움직인다. 휠(1 mm), Ctrl+휠(0.1 mm), X/Y/Z 키를 눌러 본다.
+3. 좌클릭(또는 Enter)으로 확정 → Ctrl+Z → Ctrl+Shift+Z.
+4. 다시 Adjust → 움직인 뒤 Esc.
+
+기대 결과:
+- 2단계에서 평면이 법선 방향으로 마우스를 따라 움직이고, 헤더에 `Cut offset +x.xx mm` 안내가 보인다. X/Y/Z는 현재 위치에서 법선을 해당 축으로 바꾼다.
+- 3단계 Ctrl+Z 한 번에 조정 전 평면으로, Ctrl+Shift+Z로 조정 후 평면으로 돌아간다.
+- 4단계 Esc 후 평면이 모달 시작 전 위치·방향으로 돌아오고 헤더 안내가 사라진다.
+
+## QA-6 Draft 패널 → Build → Export (P1-12 GUI)
+
+절차:
+1. 큐브 선택, Z·X 컷 추가. 목록 체크박스로 한 컷을 껐다 켠다. X 컷을 선택하고 Connectors > Distribute.
+2. Build & Export > **Build**. 그 다음 Export 폴더를 지정하고 **Export Parts**. 마지막으로 Clear Build(X 아이콘).
+
+기대 결과:
+- 1단계 Distribute 후 X 컷 시임의 두 영역(Z 컷 위/아래)에 커넥터가 2개씩(노란 원 + 핀 쪽 표시 선) 보인다.
+- 2단계 Build 후 원본은 숨겨지고(데이터 불변) `SplitForge_Build_Cube` 컬렉션에 매니폴드 파트 4개(`Cube_AA`…)가 생기며,
+  파트를 선택해도 패널은 원본의 스택("Part of Cube")을 보여 준다. Rebuild는 같은 컬렉션을 교체한다(오브젝트 누적 없음).
+  Export는 파트당 파일(mm 단위)을 쓴다. Clear Build는 파트·컬렉션을 지우고 원본을 다시 보이게 한다.
 
 ## QA-1 분할 프리뷰 표시 (P0-6 GUI)
 
@@ -118,6 +144,19 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
   회귀 테스트는 `tests/cases/test_modal_undo_safety.py`(headless)와 `python3 tests/run_tests.py --gui`
   (`tests/gui/gui_runner.py`: 모달 중 undo/redo·휠 입력, 커넥터 프리뷰 재생성, 모달 중 파일 로드 시 `cancel()` 정리를
   이벤트 시뮬레이션 GUI 인스턴스에서 확인. 실행 중 창을 건드리지 말 것).
+- **라이브 세션에서 애드온 코드를 바꾼 뒤에는 disable/enable만으로는 새 코드가 로드되지 않는다**(파이썬 모듈 캐시).
+  disable → `sys.modules`에서 `bl_ext.<repo>.<pkg>`와 `bl_ext.<repo>.<pkg>.*`를 모두 삭제 → enable 순서로 다시 읽는다.
+  모달이 떠 있지 않은지 먼저 확인한다(`window.modal_operators` 비어 있음). 예:
+  ```python
+  import bpy, sys
+  mod = "bl_ext.splitforge_dev.splitforge"   # 이름 변경 전 레포: bl_ext.splitforge_dev.snapsplit
+  bpy.ops.preferences.addon_disable(module=mod)
+  for k in [k for k in sys.modules if k == mod or k.startswith(mod + ".")]:
+      del sys.modules[k]
+  bpy.ops.preferences.addon_enable(module=mod)
+  ```
+  (참고: `/mnt/c/code/snapsplit_probe/mcp/qa3/reload2.py`.) 패키지 폴더가 `snapsplit/`→`splitforge/`로 바뀌었으므로
+  라이브 extension 레포의 폴더도 새 이름으로 맞춰야 한다.
 - 사용자가 쓰는 Blender(MCP 서버 호스트)로 크래시 재현을 하지 않는다. 별도 인스턴스를 `--factory-startup`으로 띄우고,
   `TEMP`/`TMP`를 별도 폴더로 지정해 `%TEMP%\blender.crash.txt`·`quit.blend`를 덮어쓰지 않게 한다
   (WSL에서는 `WSLENV=TEMP:TMP`로 전달). `tests/run_tests.py`는 모든 Blender 하위 프로세스를 `tests/_out/tmp`로 돌리며,
@@ -129,15 +168,20 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| QA-5 컷 평면 모달 조정 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p1-mvp2: `--gui` p1_adjust_plane — 오버레이 주황, 드래그·휠·X·LMB·Esc, 실제 Ctrl+Z/Ctrl+Shift+Z, 모달 중 undo/redo, 파일 로드 `cancel()`. 사람 확인 남음: 드래그 감도, 오버레이 가독성 [5.2](qa/p1_adjust_plane_5.2.png) |
+| QA-6 Draft 패널 → Build → Export | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p1_panel — 실제 버튼 클릭(추가·undo/redo·체크박스·삭제·Distribute·Build·Export·Clear). 사람 확인 남음: 패널 배치·문구 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png). 라이브 5.2(MCP)에서는 확인하지 않음(사용자 세션 미사용 규칙) |
 | QA-1 분할 프리뷰 표시 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브, 애드온 재로드): 40 BU 큐브 Z/3파트 → 평면 2개(z=±6.667)가 Solid 뷰에서 **주황**으로 보임(`diffuse_color`=(1, 0.45, 0, 0.8), `show_in_front`) [fixed](qa/qa1_52_preview_z3_fixed.png); X/2파트 → X축 평면 1개; 끄면 평면·컬렉션 제거, X-Ray 원복, **고아 메쉬 0**(수정 전 8). 콘솔 오류 없음. `--gui` qa1_preview_color PASS(따뜻한 픽셀 0.0002→0.0593). 이전 결과(회색): [z3](qa/qa1_52_preview_z3.png) |
 | QA-2 모달 분할 위치 조정 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브): 프리뷰 끈 상태로 Adjust 실행 중 오프셋을 5번 바꿔도 평면이 삭제·재생성되지 않고 **고아 메쉬 0**(수정 전 17), 파일 로드 `cancel()` 후 모달·X-Ray·`_ADJUST_RUNNING` 정리, 이후 프리뷰 갱신 정상. 드래그(4×25 px → +2.0 mm, 평면 동일 위치)·좌클릭/Enter 확정·Esc 취소는 `--gui` qa2_adjust(4.5/5.2) PASS로 확인. 오프셋으로 Planar Split 높이 일치·캡은 이전 라이브 확인. 사람 확인 남음: 실제 장치의 드래그 감도 |
 | QA-3 클릭 커넥터 배치 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브): 수정된 공통 준비(mm, Unit Scale 1.0, 큐브 40 BU)에서 핀 프리뷰 5×5×7.7 BU가 40 BU 큐브 시임 중앙에 올바른 비율로 표시, 상태바 키 안내 [fixed](qa/qa3_52_click_preview_fixed.png); 파일 로드 `cancel()` 후 프리뷰·고아 메쉬 0·X-Ray 정리. 커서 추종·좌클릭 배치(핀 쪽 부피 +, 소켓 쪽 −, 목표 위치)·S 스왑·매니폴드·우클릭 정리는 `--gui` qa3_connectors PASS. 사람 확인 남음: Ctrl+Z 단위 기록, 와이어 프리뷰 가독성 |
 | QA-4 Freehand 스트로크 컷 | requires manual check | PASS (제한 있음) | 2026-10-09: 라이브에서 모달·헤더 안내·자체 정리 확인(이전 행 참고 [modal](qa/qa4_52_freehand_modal.png)). 스트로크·Shift 축 스냅·Enter로 매니폴드 2파트(부피 합 일치)·Esc 무변경·파일 로드 `cancel()`은 `--gui` qa4_freehand PASS. **열린 항목**: 눈(별도 셸)이 있는 Suzanne는 확정을 거부(B3 제한) → 절차에서 눈 제거 |
 
-자동 GUI 결과(`python3 tests/run_tests.py --gui`, 2026-10-09, `fix/qa-findings`):
+자동 GUI 결과(`python3 tests/run_tests.py --gui`, 2026-10-09, `feat/p1-mvp2`): 아래 10개 시나리오 모두 4.5.5/5.2.2 PASS
+(p1_adjust_plane ~25 s, p1_panel ~185 s: 버튼 hover 스캔 3회). 이전 기록(`fix/qa-findings`):
 
 | 시나리오 | Blender 4.5.5 | Blender 5.2.2 | 메모 |
 |---|---|---|---|
+| p1_adjust_plane | PASS | PASS | feat/p1-mvp2 |
+| p1_panel | PASS | PASS | feat/p1-mvp2. 처음 실행에서 X 컷 커넥터가 Z 컷 평면 위에 놓여 건너뛰어지는 버그를 찾음 → 시임 영역별 배치로 수정 |
 | qa1_preview_color | PASS | PASS | 수정 전(2ac1865): 평면 회색(따뜻한 픽셀 0.0002 → 수정 후 0.0593), 고아 메쉬 누적 |
 | qa2_adjust | PASS | PASS | 수정 전: 드래그 이벤트마다 평면 삭제·재생성으로 고아 메쉬 누적 |
 | qa3_connectors | PASS | PASS | |

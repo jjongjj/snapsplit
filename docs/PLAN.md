@@ -3,6 +3,14 @@
 작성일: 2026-10-09 / 기준: `master` (v0.1.9), `upstream/V_0.2.0_freehand` (v0.2.0)
 Blender 대상: 4.2 LTS ~ 5.x (검증 환경: 4.5.5 LTS, 5.2.2 LTS, Windows exe를 WSL에서 headless 호출)
 
+> **식별자 결정(2026-10-09, 사용자)**: 포크의 extension id는 `splitforge`, 표시 이름은 "SplitForge"(임시 작업명).
+> 이름은 `splitforge/core/naming.py` 한 곳(+ `blender_manifest.toml`의 `id`/`name`, 패키지 폴더 이름)에 모여 있다.
+> 새 오퍼레이터·패널·PropertyGroup은 `splitforge.*` / `SPLITFORGE_OT_*`·`SPLITFORGE_PT_*`·`SPLITFORGE_PG_*`,
+> 스택은 `Object.splitforge_stack`, 새 전역 설정은 `Scene.splitforge`, 파트 프로퍼티는 `["splitforge_source"]`·`["splitforge_cut_ids"]`.
+> 레거시 `snapsplit.*` 오퍼레이터와 `Scene.snapsplit`는 Phase 3까지 이름 유지. 아래 본문의 `SNAP_PG_*`·`snapsplit.<새 op>`·
+> `obj.snapsplit_stack` 표기는 이 규칙으로 읽는다. 업스트림 SnapSplit(Betakontext)은 manifest/README에 크레딧(GPL 유지).
+> 레거시 UI는 Phase 3까지 새 메인 패널의 접힌 "Legacy" 서브패널로 유지(결정 4).
+
 ---
 
 ## 1. 현황 분석 (Gap Analysis)
@@ -91,8 +99,8 @@ Blender 대상: 4.2 LTS ~ 5.x (검증 환경: 4.5.5 LTS, 5.2.2 LTS, Windows exe�
 ### 4.1 모듈 레이아웃
 
 ```
-snapsplit/
-  __init__.py                 # 등록 순서: core → model → ops → ui, 레거시 포함
+splitforge/                   # (Phase 0까지 snapsplit/)
+  __init__.py                 # 등록 순서: 레거시 → model → ops → ui(새 패널) → ui/legacy.py(Legacy 서브패널)
   blender_manifest.toml
   core/
     compat.py                 # bpy.app.version 가드, 재질/모디파이어 API 차이 흡수
@@ -124,7 +132,7 @@ snapsplit/
     ops_export.py             # 일괄 STL/OBJ/FBX
     ops_validate.py
   ui/
-    panel.py, lists.py (UIList), overlay.py (gpu 오버레이 프리뷰)
+    panel.py (패널 + UIList), overlay.py (gpu 오버레이 프리뷰), legacy.py (레거시 패널, 구 ui.py)
   legacy/ (Phase 3 말까지 유지) ops_split.py, ops_connectors.py, ops_align.py, ops_freehand.py, seam_data.py, profiles.py
   localization.py
 tests/
@@ -218,7 +226,7 @@ run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
 - 모달·타이머·핸들러는 이벤트 사이에 bpy 구조체 참조를 보관하지 않는다(특히 `context.scene.snapsplit` 같은 ID 내부 구조체: undo/redo가 ID 프로퍼티를 재할당하면 해제된 메모리를 가리켜 크래시). 이름·숫자만 저장하고 매 이벤트 다시 조회, 대상이 사라지면 정리 후 종료, `cancel()`에서도 정리. 회귀 테스트 `tests/cases/test_modal_undo_safety.py`.
 - 재빌드 시 이전 결과 컬렉션을 통째로 교체(이름 재사용), 중간 오브젝트는 생성하지 않거나 즉시 제거.
 
-### 4.6 UI 레이아웃 (N 패널 "SnapSplit")
+### 4.6 UI 레이아웃 (N 패널 "SplitForge")
 
 1. **Validate** 박스: 매니폴드/변환/단위 상태 아이콘 + Fix 버튼.
 2. **Mode**: Draft | Easy 토글.
@@ -264,8 +272,8 @@ run_cut(part_mesh_obj, cutter_solid, side) -> Result(obj, ok, method, stats)
 ## 7. 사용자 결정 필요 사항
 
 1. 베이스 브랜치: 제안대로 `upstream/V_0.2.0_freehand`에서 `develop` 분기 승인 여부(대안: master + 필요 시 cherry-pick).
-2. 제품 식별자: `id="snapsplit"` 유지(업스트림과 extension ID 충돌 가능) vs 포크용 새 id/이름. 바꾸면 `bl_idname` 접두어·번역 사전 키도 영향.
+2. ~~제품 식별자~~ → **결정됨**: `id="splitforge"`, 이름 "SplitForge"(임시, `core/naming.py`로 중앙화). 문서 상단 참고.
 3. 최소 지원 버전: manifest 4.2 유지하되 자동 검증은 4.4/4.5/5.2만 할지, 4.2 LTS를 설치해 검증 대상에 넣을지.
-4. 레거시 오퍼레이터 공개 유지 기간(Phase 3까지 vs MVP 이후 즉시 숨김).
+4. ~~레거시 공개 유지 기간~~ → **결정됨**: Phase 3까지 유지, 새 메인 패널 아래 접힌 "Legacy" 서브패널.
 5. 곡선 컷 방식: 뷰 투영 리본(제안, 스트로크 1회) vs 표면 투영 경로 + 법선 오프셋(표면을 따라가지만 구현 난도↑). Phase 2 착수 전 확정.
 6. 양면 도웰의 도웰 본체를 결과 컬렉션에 "출력용 파트"로 포함할지, 규격 시판 도웰(예: Ø3mm 핀) 가정으로 소켓만 만들지.
