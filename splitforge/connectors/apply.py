@@ -146,6 +146,7 @@ def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
                                     "skipped (move it inward, or Distribute again)")
                 continue
         solids = shapes.connector_solids(spec)
+        out.warnings += [f"{spec.label}: {note}" for note in solids.notes]
         capsule = shapes.capsule(spec, solids)
         for piece in (pin_piece, socket_piece):
             if any(_capsules_touch(capsule, other) for other in capsules.get(piece, ())):
