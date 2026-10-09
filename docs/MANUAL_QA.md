@@ -347,13 +347,58 @@ headless(검증자 스크래치, 커밋 안 함):
 
 ---
 
+## Phase 3 커넥터 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-10, develop f2a2f46)
+
+독립 검증자(verifier), 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa10/`, 같은 안전 규칙(MCP undo·참조 보관·타이머·프리퍼런스 리셋 없음,
+MCP 애드온 미변경). Millimeters + Unit Scale 0.001. 재로드(`qa10/reload.py`): `bl_ext.splitforge_dev.splitforge*` 43개 purge 후 enable,
+`Scene.snapsplit`·레거시 오퍼레이터 미등록, `connector_add_click` 등록.
+
+1. 40 mm 큐브 `QA10_Cube`(x −150)에 Z 평면 컷(−8, gap 0.4) + S자 스트로크(z 8 ± 3, gap 0.4), 8종 전부(`qa10/scenario.py`):
+   Z 컷 원기둥 핀(A)·사각 테논(B)·도브테일(A)·스냅 핀(B)·도웰, S자 스냅 테논(A)·스냅 도브테일(B)·커스텀(육각 뿔대, 법선 뒤집힘)·도웰.
+   Build(Auto) 1.39 s, **경고 0**, "Booleans (Auto): 6x EXACT, 2x EXACT_SELF", 파트 AA/AB/BB + `QA10_Cube_Dowel_1`(Cut Z connector 5)·`Dowel_2`
+   (Stroke 2 connector 4) 모두 매니폴드, 원본 해시 불변·숨김·모디파이어 0, 고아 메쉬·`_SplitForge*` 0, 큐브 밖 0.
+2. 조립 검사(`qa10/assembly.py`, 커넥터마다 핀 쪽 파트를 갭만큼 법선 방향으로 옮김): 9개 모두 파트 관입 0, 최소 여유(c 0.2) — 원기둥 0.199,
+   테논 0.200, 도브테일 0.200(면 수직), 스냅 3종 0.1925(구 면 분할), 커스텀 0.1875, 도웰 2개 0.199(곡선 시임 포함). 도웰 길이 10/8, 지름 5,
+   원본 +X 면에서 5 mm, 바닥 z −20. (갭이 열린 상태의 스냅 돌기는 딤플과 갭만큼 어긋나 최대 0.12 mm 겹침 — 설계상 정상.)
+3. Export STL(`qa10/out/stl`): AA/AB/BB + **Dowel_1/Dowel_2** 5개 파일.
+4. 스크린샷: 분해 표시한 3파트(소켓·핀·커스텀 육각 핀) + 눕힌 도웰 2개 + 오버레이 + 패널(커스텀 커넥터 상자 "Custom mesh / QA10_Hex",
+   목록 "1 Snap tenon pin A … 4 Dowel both sides", "5 part(s)") [파트+패널](qa/p3_live_52_parts_panel.png).
+   인터페이스 번역을 잠시 켠 한국어 패널(원래 설정 ko_KR + 번역 끔으로 복원) [한국어](qa/p3_live_52_ko_panel.png): "새 커넥터", "도웰 (별도 파트)",
+   "모따기", "라인/격자", "개수", "여백 %", "클릭", 목록 "1 스냅 테논 핀 A … 4 도웰 양쪽"은 번역됨. **"Distribute", "Redraw in Viewport"는 영어**(D18).
+
+headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p3v/`, 커밋 안 함):
+- 커넥터 매트릭스 8종 × 6장면(중앙 회전 핀 A/B, 벽 0.1 mm/관통 위치, 4 mm 판, 다른 컷 교차, S자 Distribute 3, 세로 S 리본 옆): 48빌드 모두 매니폴드,
+  외곽 면적 = 커넥터 없는 빌드(관통 0), 가장자리·판 두께 초과·다른 컷/리본 교차 커넥터는 이유와 함께 건너뜀, 조립 시 관입 0, 핀 여유 0.234–0.250(c 0.25),
+  도웰(곡선 시임 포함) 0.249.
+- 커스텀 적대 메시 14종: L자·법선 뒤집힘·원뿔(양 방향)·토러스·셸 2개(겹침/분리)·미세(0.1 µm) 정상(관입 0); 열린 메시·20 480면·납작 → "… skipped";
+  9 728면 UV 구 빌드 4.1 s. 별 모양 오목 꼭짓점 여유 0.177, 날카로운 원뿔 끝 0.215(c 0.25). **0.3 mm 슬롯(< 2c)**: 오프셋이 접혀 합치기가 D16 검사에 거부
+  → 파트 불리언 EXACT_SELF 비매니폴드 → MANIFOLD 폴백 → 조립 시 핀이 소켓 파트를 0.05 mm 관통, 경고 없음(정보 줄 "fallbacks"만)(D17). 슬롯 0.45/0.6/1.0은 정상.
+- D16 검사: 얇은 교차 판 200×200×0.6(수평·수직), 겹친 구 30개 → 모두 합침 승인. 뒤집힌 셸 입력 거부. 비용: 24.8만 면 `winding_volume` 0.1 s.
+  누락 검출: 0.3 mm 두께 판 셸(부피 0.75 %)을 잃는 경우 8개 위치 중 2개에서 광선 사이로 빠져 미검출(격자 간격 bbox/96 미만 셸, 낮음).
+- 옛 파일: 8fe02fa(레거시 포함)로 레거시 `planar_split`+`add_connectors`+Scene.snapsplit 값(커스텀 포인터, PETG)+P2 스택을 저장한 .blend를 새 애드온으로 열기 →
+  오류·트레이스백 0, 패널 4개 정상 그리기(레거시 소스/파트/P2 큐브), P2 큐브 Rebuild·레거시 파트에 새 스택 Build 매니폴드, 다시 저장·열기 정상.
+
+열린 항목:
+- [낮음~중간] D17: 커스텀 메시의 오목 특징이 2×공차보다 좁으면(슬롯 등) 법선 오프셋 소켓이 접히고, MANIFOLD 폴백 결과가 조립 시 0.05 mm 간섭.
+  경고 없음. 날카로운 꼭짓점/오목 모서리 여유가 공차보다 작음(0.18/0.25). 제안: 합치기 실패 시 경고, 또는 셸 팩터 대신 면 오프셋 합집합(민코프스키 근사).
+- [낮음] D18: 패널의 오퍼레이터 버튼 텍스트 5개("Cut", "Adjust in Viewport", "Draw Cut", "Distribute", "Redraw in Viewport")는 `("*", …)` 항목만 있고
+  `("Operator", …)` 항목이 없어 ko/de에서 영어로 표시. `test_i18n`은 이 컨텍스트를 검사하지 않음. f-문자열 라벨("Part of …", "Gap … mm", "On …",
+  "Stroke: … points")도 미번역.
+- [낮음] 패널의 커스텀 메시 문제 캐시는 (이름, 정점/변/면 수)로만 갱신되고 평가 전 메시(`obj.data`)를 검사(Build는 평가 메시) — 개수를 유지한 편집이나
+  모디파이어로 닫히는 메시에서 패널 표시가 Build와 다를 수 있음.
+- [낮음] 클릭 모달: S가 Ctrl과 함께여도 핀 쪽을 바꾸고(Ctrl+S 저장을 먹음), Alt+LMB도 소비.
+- [낮음] 51만 면 Accurate 평면 Build 59.6 s(구현자 49.6 s; 상한 120 s 안). Auto의 BB 소켓 불리언이 EXACT_SELF 5.5–7.9 s(겹침 표시된 파트).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
+| Phase 3 커넥터 라이브(MCP) | — | PASS (결함 D17·D18) | 2026-10-10 verifier, develop f2a2f46: Z+S자 큐브에 8종(커스텀·도웰 2개 포함) Build 경고 0·매니폴드·조립 관입 0·여유 0.19–0.20(c 0.2), STL에 도웰 2개, 한국어 패널. `--gui` 6×2·헤드리스 38/38 ×2·`--slow` PASS, 뮤테이션 7/7. 위 "Phase 3 커넥터 라이브 검증" 절 |
 | QA-9 클릭 커넥터 배치 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p3-connectors: `--gui` p3_connector_click — 실제 클릭 3회·S·물체 밖 무시·실제 Ctrl+Z 3회 하나씩/Ctrl+Shift+Z 3회(모달 중과 끝난 뒤)·Build·파일 로드 `cancel()`. 사람 확인 남음: 프리뷰 가독성, 실제 마우스 감각 [프리뷰](qa/p3_click_preview_5.2.png) [배치](qa/p3_click_placed_5.2.png) [빌드](qa/p3_click_built_5.2.png) |
 | QA-10 커넥터 종류 | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p3_connector_types — 8종 빌드(A, B, Dowel_1) [소켓](qa/p3_types_built_5.2.png) [핀](qa/p3_types_pins_5.2.png). 사람 확인 남음: 실제 출력 후 끼움 감각(공차·스냅 돌기 높이) |
-| D16 셸 합치기 하한 | — | — | 2026-10-09: headless `test_unite_check`(3 %·1 % 축소·셸 누락 주입 거부). 라이브 미확인(사용자 세션 미사용 규칙) |
+| D16 셸 합치기 하한 | — | PASS (headless 재확인) | 2026-10-09: headless `test_unite_check`(3 %·1 % 축소·셸 누락 주입 거부). 2026-10-10 verifier: 얇은 판·구 30개 합침 승인, 24.8만 면 0.1 s, bbox/96보다 얇은 셸 누락은 일부 미검출(낮음) |
 | D13–D15 수정 라이브(MCP) | — | PASS (새 결함 D16) | 2026-10-09 verifier, develop 3d90da6: 눈 있는 Suzanne 평면+S자+커넥터 — Accurate "6x EXACT" 폴백 0·셸 합침 정보, Fast "6x MANIFOLD"·겹침 정보. `--gui` 12×2·헤드리스 38/38 ×2·`--slow` PASS. 위 "D13–D15 수정 라이브 검증" 절 |
 | P2 후속 수정 라이브(MCP) | — | PASS (결함 D13–D15) | 2026-10-09 verifier, develop 398154a: 품질 Accurate/Fast/Auto 비교(눈 있는 Suzanne S자), 정보 줄 솔버·폴백, 갭 문제 패널 표시·해제. `--gui` 12×2·헤드리스 37/37 ×2·`--slow` PASS. 위 "P2 후속 수정 라이브 검증" 절 |
 | P2 곡선 컷 라이브(MCP) | — | PASS (결함 D9–D11) | 2026-10-09 verifier, develop 29cd845: 큐브·Suzanne(눈) S자 gap 0.5, 곡면 시임 커넥터, Build 매니폴드·관입 0·원본 불변·눈 정보 메시지. `--gui` 12시나리오 ×2·헤드리스 34/34 ×2·`--slow` PASS. 열린 항목 — 위 "P2 곡선 컷 라이브 검증" 절 |

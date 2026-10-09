@@ -265,6 +265,13 @@
   D16 하한 끔, 도웰 파트 미생성). 미검출 1건: ko의 `("*", 오퍼레이터 라벨)` 항목 삭제 — 오퍼레이터 라벨은 Operator 컨텍스트로만 표시되므로 등가 뮤턴트.
 - 결정·편차: 도브테일은 밀어 넣는 테이퍼 테논만(레거시 음수 테이퍼·Span Axis/Hard-side Cut 레일 미이관), 스냅 변형은 커스텀에 없음, Align Faces 제거,
   도웰 길이 = length_mm(체크리스트 원안 2×length_mm), `double_sided` 대신 DOWEL 종류, 클릭 모달은 UNDO 플래그 없이 클릭마다 undo_push, 툴팁 미번역.
+- 독립 검증(2026-10-10, verifier, develop f2a2f46): 헤드리스 38/38 ×2회 PASS(4.5.5/5.2.2), `--gui` 6시나리오 ×2 PASS(p3_connector_click 18/22 s, p3_connector_types 7 s),
+  `--slow test_perf_large`(5.2) PASS: 평면 Auto 15.89 s / Accurate 59.56 s, 타입 Build Auto 15.45 s / Accurate 48.43 s, S자 Auto 9.43 s / Accurate 44.90 s(< 120 s).
+  `extension validate` 성공, `extension build` → splitforge-0.3.0-dev.zip(39파일, 레거시·pycache 없음). 뮤테이션 7/7 검출(소켓 끝 +c 제거, 딤플 반지름 +c 제거,
+  셸 팩터 제거, 클릭 핀 쪽 미적용, 모따기 값 미전달, D16 허용치 0.2→1.2 %, 도웰 크기 = 소켓 크기). 적대: 8종 × 6장면 매트릭스(벽·판·다른 컷·리본·곡선 시임) 관통 0·조립 관입 0·
+  여유 ≥ 0.234(c 0.25), 커스텀 14종, 도웰 곡선 시임 여유 0.249, 레거시 .blend 열기 오류 0. 라이브 5.2 PASS(MANUAL_QA "Phase 3 커넥터 라이브 검증").
+  열린 결함: D17 좁은 오목 특징(< 2c) 커스텀 소켓 접힘 → MANIFOLD 폴백 0.05 mm 간섭·경고 없음, 날카로운 모서리 여유 감소(낮음~중간); D18 오퍼레이터 버튼 텍스트 5개
+  Operator 컨텍스트 번역 없음(ko/de에서 영어, 낮음).
 
 ## Phase 4 — Manual/Polygonal 컷, 검증 강화, 패키징
 
