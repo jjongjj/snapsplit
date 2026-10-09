@@ -495,6 +495,32 @@ headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p4v/`, 커밋 안 �
 
 ---
 
+## Phase 4 후속(0.4.1) + D22 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-10, develop 946a7a7 → 0fd12d3)
+
+독립 검증자, 스크립트 `/mnt/c/code/snapsplit_probe/mcp/qa13/`, `qa14/`, 같은 안전 규칙. 설치된 릴리스 애드온 교체: `bl_ext.user_default.splitforge` 비활성 →
+`extensions.package_uninstall`(폴더 삭제 확인) → 모듈 40개 purge → develop에서 다시 빌드한 zip을 `package_install_files(user_default, enable_on_install)`.
+
+1. 0.4.1(946a7a7 빌드, `qa13/`): 10° 폴리라인 + 갭 0.3 — Easy 추가 거부, Draft 추가 후 갭 → 패널 문제·Build 거부("too sharp for a gap (10.0 degrees …)");
+   9.5° 폴리곤 Easy 거부. 20° 폴리라인 갭 0.3: 패널 문제 없음, Distribute 2개, Build 0.15 s, 매니폴드 2파트 [V 20°](qa/p4f_live_52_v20_gap.png).
+   0.2 mm 폴리곤 거부. 같은 빌드에서 500 mm 큐브의 10×10×5 포켓이 거부됨 → D22.
+2. D22 수정(0fd12d3 빌드, `qa14/`, zip 내용 = p4d zip = git HEAD): 500 mm 큐브 10×10×5 포켓 추가·Build 0.02 s "2x EXACT", 플러그 500.0 / 몸체 124999500.0 매니폴드
+   [큰 포켓](qa/p4d_live_52_big_pocket.png); 2 m 큐브 1×1×1 → "too small for an object this large (1 mm^3; the booleans need at least 1.6e+04 mm^3 here)", 컷 추가 안 됨.
+   0.4.1(수정본)을 켜 둔 채로 둠. 원래 씬 "Scene"으로 돌아감; 주 뷰포트 clip_end는 스크린샷 동안 바꿨다가 1000(다른 뷰와 같은 값)으로 되돌림.
+
+headless(검증자 스크래치 `/mnt/c/code/snapsplit_probe/p4v/`, 커밋 안 함):
+- D20: V 폴리라인 10/14.9/15/20/25/40° × 갭 0/0.3/1 — 15° 이상(14.9° 포함) 모두 첫 EXACT×2, 경고 0, 매니폴드, 잰 틈 정확히 0.300/1.000; 10° + 갭은 패널·Build가 각도와 함께 거부.
+  여러 개의 ~20° 꼭짓점 지그재그·이전 실패 지그재그 갭 0.3/1 정상. 폴리곤 스파이크 15/20° 모든 갭 정상, 10°·14.3° + 갭 거부. 성능 변화 없음(`--slow` 0.4.0과 같은 수준).
+- D22 경계(500 mm 큐브, 필요 250 mm³): 240/249 거부, 251/260/400 빌드. 거부를 끈 사본으로 같은 포켓: 124 mm³ 이하는 Build가 "volume did not shrink"로 실패,
+  126 mm³ 이상은 EXACT로 성공 — 불리언 검사 허용치(max(조각, 연산자) 부피 × 1e-6 = 125 mm³)와 규칙(2 × 1e-6 × bbox)이 일관, 여유 2배.
+  300 mm 4×4×10·6×6×5, 40 mm 1×1×0.5, 0.4.0식 저장 포켓(관통 → 깊이 5) 모두 빌드; 깊이 0.19 거부/0.2 빌드, 폭 0.49 거부/0.5 빌드, 메시지가 각 검사를 밝힘.
+- 델타 변환 + 자식·손자 + 컷 스택: 적용 후 스케일 1·델타 초기화, 월드 정점 동일, 스트로크 점 5.8e-6, 자식 1.9e-6, Build 부피 동일; 쿼터니언 델타도 같음.
+
+열린 항목(낮음):
+- 부피 규칙은 bbox 기준이라 bbox가 물체보다 훨씬 큰 경우(대각선 1 m 막대 Ø20: bbox 594³) 6×6×8 포켓(288 mm³ < 418)이 거부됨 — 실제 불리언 허용치는 0.3 mm³. 보수적 쪽.
+- 부피 추정에 폴리곤 전체 면적을 씀(물체와 겹친 부분이 아님): 큰 폴리곤이 모서리를 0.1 mm만 걸치면 추가는 통과하고 Build가 VOXEL 폴백(경고와 함께, 몸체 표면 근사).
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
