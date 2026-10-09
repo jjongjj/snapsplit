@@ -73,6 +73,7 @@
   결과: `test_ui_draw` PASS 4.5/5.2. GUI: `python3 tests/run_tests.py --gui`의 `p1_panel`(실제 버튼 클릭)·`p1_adjust_plane` PASS 4.5/5.2. 스크린샷 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png), 모달 [4.5](qa/p1_adjust_plane_4.5.png) [5.2](qa/p1_adjust_plane_5.2.png).
 - [x] **P1-13 회귀**: 레거시 케이스(P0-5) 포함 전체 PASS, 두 버전.
   검증: `python3 tests/run_tests.py` exit 0.
+  독립 검증(2026-10-09, verifier, develop e148026): 헤드리스 24/24 ×2회 PASS(4.5.5/5.2.2), `--gui` 10시나리오 ×2버전 PASS, `--slow test_perf_large` PASS(5.2: split 4.54 s, connectors 12.97 s, build 9.16 s), 뮤테이션 13건 전부 테스트가 검출, `extension validate` 성공, 라이브 5.2 MCP PASS(MANUAL_QA "P1 라이브 검증"). 열린 결함: 경사 컷 자동 커넥터가 외곽 관통(P1-8 범위 밖, 중간).
   결과: 헤드리스 24/24 PASS ×2회(4.5/5.2), `--gui` 10개 시나리오 PASS(4.5/5.2), `--slow --case test_perf_large` PASS(5.2: split 4.87 s, connectors 14.11 s, 새 Build 9.27 s).
 
 ## Phase 2 — 곡선 컷 + 불리언 폴백 + 진행률

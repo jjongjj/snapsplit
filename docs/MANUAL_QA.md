@@ -164,12 +164,42 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
 
 ---
 
+## P1 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop e148026)
+
+독립 검증자(verifier)가 사용자 세션 Blender 5.2.2에서 MCP 스크립트(`/mnt/c/code/snapsplit_probe/mcp/qa4/`)로 실행.
+안전 규칙 준수: MCP로 undo 없음, bpy 참조 보관 없음, 타이머 없음, 프리퍼런스 리셋 없음, MCP 애드온 미변경.
+
+1. 재로드(`qa4/reload.py`): `bl_ext.splitforge_dev.snapsplit` disable → `bl_ext.splitforge_dev.*` 13개 `sys.modules`에서 삭제 →
+   `extensions.repo_refresh_all` → `bl_ext.splitforge_dev.splitforge` enable. 로드 경로 `C:\code\snapsplit-develop\splitforge\__init__.py`,
+   `Scene.splitforge`·`Object.splitforge_stack`·`splitforge.*` 오퍼레이터 등록, `SNAP_PT_panel`은 `bl_parent_id=SPLITFORGE_PT_main`, `DEFAULT_CLOSED`.
+2. 검증(`step1`): mm 씬(Millimeters, 1.0)에 40 BU 큐브 `QA4_Cube` → `splitforge.validate` "Mesh is ready", 리포트 전부 OK.
+3. 컷(`step2`): Z 컷(offset −5 mm) + 임의 각도 컷(origin (3,0,0), normal (1,0.6,0.35) → (0.821,0.493,0.288), gap 0.5 mm),
+   각 컷 Distribute → 시임 영역별 2개씩, 컷당 4개(총 8개). 오버레이: 활성 컷 주황, 다른 컷 파랑, 커넥터 노란 원 [패널](qa/p1_live_52_draft_panel.png).
+4. Build(`step3`): FINISHED, `SplitForge_Build_QA4_Cube`에 4파트(AA/AB/BA/BB) 모두 매니폴드, 경고 없음, 원본 정점 해시 빌드 전후 동일
+   (`752b1341…`), 원본 숨김·모디파이어 0·scale 1, 새 오브젝트 4·메쉬 4, 고아 메쉬 0, `_SplitForge_Operand` 잔존 없음.
+   부피 합 62894.7 mm³(원본 64000 − 갭 − 소켓/핀 차) [파트](qa/p1_live_52_parts.png).
+5. Easy Cut(`step4`): 원기둥(r 15, h 50) `splitforge.easy_cut(axis='Z', offset_mm=4)` → 스택 1개(커넥터 2), 매니폴드 2파트
+   (14996.8 / 20203.8 mm³, 핀·소켓 반영 수치와 일치), 원본 불변. 패널 Easy 모드·Build & Export·접힌 Settings/Legacy [Easy 패널](qa/p1_live_52_easy_panel.png).
+6. Export: `splitforge.export_parts(directory=…\qa4\out\stl, formats={'STL'})` → 파트당 STL 4개(26–33 KB). WSL에서 파싱: 부피 합 62894.7 mm³
+   (Blender 값과 일치 → mm 단위 기록), bbox ±20 mm 범위.
+
+결과: PASS, 단 아래 결함 확인.
+- **[중간] 임의 각도 컷의 자동 커넥터가 외곽을 뚫음**: 위 4단계 큐브에서 경사 컷 커넥터 4개 모두 핀이 큐브 외곽(±20 mm) 밖으로
+  0.4–1.65 mm 나가고, 커넥터 2의 소켓은 외벽을 0.94 mm 관통(`qa4/probe_protrude.py`). 조립 상태에서 외면에 초승달 모양 돌기/구멍이 보인다
+  [스크린샷](qa/p1_live_52_exterior_artifacts.png). `distribute_points`는 중심만 시임 안에 두고 커넥터 반경·기울어진 핀 축과 벽의 거리를
+  보지 않는다(P1-8 수용 기준 범위 밖). 축 정렬 컷(40 mm 큐브, 원기둥)에서는 발생하지 않음. 빌드 경고도 없음.
+- [낮음] 단위 표시 차이(P1-1 사용자 결정 대기): 패널 Origin X가 3 BU를 "3000 mm"로 표시.
+- [낮음] UI 목록이 좁은 사이드바에서 컷 이름이 잘림("C…", "gap …").
+
+---
+
 ## 결과 기록
 
 | 항목 | Blender 4.5 | Blender 5.2 | 날짜/메모 |
 |---|---|---|---|
 | QA-5 컷 평면 모달 조정 | PASS (자동) | PASS (자동) | 2026-10-09 feat/p1-mvp2: `--gui` p1_adjust_plane — 오버레이 주황, 드래그·휠·X·LMB·Esc, 실제 Ctrl+Z/Ctrl+Shift+Z, 모달 중 undo/redo, 파일 로드 `cancel()`. 사람 확인 남음: 드래그 감도, 오버레이 가독성 [5.2](qa/p1_adjust_plane_5.2.png) |
 | QA-6 Draft 패널 → Build → Export | PASS (자동) | PASS (자동) | 2026-10-09: `--gui` p1_panel — 실제 버튼 클릭(추가·undo/redo·체크박스·삭제·Distribute·Build·Export·Clear). 사람 확인 남음: 패널 배치·문구 [4.5](qa/p1_panel_4.5.png) [5.2](qa/p1_panel_5.2.png). 라이브 5.2(MCP)에서는 확인하지 않음(사용자 세션 미사용 규칙) |
+| P1 라이브(MCP) 검증 | — | PASS (결함 1건) | 2026-10-09 verifier, develop e148026: 재로드·validate·Z+경사(gap 0.5) 컷·커넥터 8·Build(4파트 매니폴드, 원본 해시 불변)·Easy Cut·STL Export(mm 확인). 경사 컷 자동 커넥터가 외곽 관통(중간) — 위 "P1 라이브 검증" 절 |
 | QA-1 분할 프리뷰 표시 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브, 애드온 재로드): 40 BU 큐브 Z/3파트 → 평면 2개(z=±6.667)가 Solid 뷰에서 **주황**으로 보임(`diffuse_color`=(1, 0.45, 0, 0.8), `show_in_front`) [fixed](qa/qa1_52_preview_z3_fixed.png); X/2파트 → X축 평면 1개; 끄면 평면·컬렉션 제거, X-Ray 원복, **고아 메쉬 0**(수정 전 8). 콘솔 오류 없음. `--gui` qa1_preview_color PASS(따뜻한 픽셀 0.0002→0.0593). 이전 결과(회색): [z3](qa/qa1_52_preview_z3.png) |
 | QA-2 모달 분할 위치 조정 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브): 프리뷰 끈 상태로 Adjust 실행 중 오프셋을 5번 바꿔도 평면이 삭제·재생성되지 않고 **고아 메쉬 0**(수정 전 17), 파일 로드 `cancel()` 후 모달·X-Ray·`_ADJUST_RUNNING` 정리, 이후 프리뷰 갱신 정상. 드래그(4×25 px → +2.0 mm, 평면 동일 위치)·좌클릭/Enter 확정·Esc 취소는 `--gui` qa2_adjust(4.5/5.2) PASS로 확인. 오프셋으로 Planar Split 높이 일치·캡은 이전 라이브 확인. 사람 확인 남음: 실제 장치의 드래그 감도 |
 | QA-3 클릭 커넥터 배치 | requires manual check | PASS | 2026-10-09 재검증(4f257db, 5.2.2 라이브): 수정된 공통 준비(mm, Unit Scale 1.0, 큐브 40 BU)에서 핀 프리뷰 5×5×7.7 BU가 40 BU 큐브 시임 중앙에 올바른 비율로 표시, 상태바 키 안내 [fixed](qa/qa3_52_click_preview_fixed.png); 파일 로드 `cancel()` 후 프리뷰·고아 메쉬 0·X-Ray 정리. 커서 추종·좌클릭 배치(핀 쪽 부피 +, 소켓 쪽 −, 목표 위치)·S 스왑·매니폴드·우클릭 정리는 `--gui` qa3_connectors PASS. 사람 확인 남음: Ctrl+Z 단위 기록, 와이어 프리뷰 가독성 |
