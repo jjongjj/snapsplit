@@ -19,7 +19,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
-from ..connectors import placement
+from ..connectors import placement, shapes
 from ..core import log, naming, units
 from ..cuts import plane, stroke
 from ..model import stack as stack_api
@@ -46,13 +46,30 @@ def plane_quad(obj, co, n, t, b):
 
 def connector_outline(matrix, kind, width, height, segments=24):
     """Closed outline of a connector cross-section in world space (seam plane)."""
-    if kind == 'RECT_TENON':
-        pts = [(-width / 2, -height / 2), (width / 2, -height / 2), (width / 2, height / 2), (-width / 2, height / 2)]
-    else:
-        r = width / 2
-        pts = [(r * math.cos(2 * math.pi * i / segments), r * math.sin(2 * math.pi * i / segments))
-               for i in range(segments)]
-    return [matrix @ Vector((x, y, 0.0)) for x, y in pts]
+    return [matrix @ Vector((x, y, 0.0)) for x, y in shapes.seam_outline(kind, width, height, segments)]
+
+
+def connector_lines(matrix, c, mm):
+    """Line segments of a connector marker: its seam outline, a stroke towards the pin side
+    (both sides for a dowel) and the snap bump positions."""
+    seg = _loop_lines(connector_outline(matrix, c.kind, c.width_mm * mm, c.height_mm * mm))
+    half = c.length_mm * mm * 0.5
+    sides = (1.0, -1.0) if c.kind == 'DOWEL' else ((1.0 if c.pin_side == 'A' else -1.0),)
+    for side in sides:
+        seg += [matrix.translation.copy(), matrix @ Vector((0.0, 0.0, side * half))]
+    if c.kind in shapes.SNAP_KINDS:
+        r = shapes.reach(c.kind, c.width_mm * mm, c.height_mm * mm) if c.kind == 'SNAP_PIN' else None
+        for i in range(max(1, c.snap_count)):
+            a = 2 * math.pi * i / max(1, c.snap_count)
+            ca, sa = math.cos(a), math.sin(a)
+            if r is None:
+                hu, hv = c.width_mm * mm * 0.5, c.height_mm * mm * 0.5
+                d = min(hu / abs(ca) if abs(ca) > 1e-9 else math.inf, hv / abs(sa) if abs(sa) > 1e-9 else math.inf)
+            else:
+                d = r
+            p = Vector((ca, sa, 0.0))
+            seg += [matrix @ (p * d), matrix @ (p * (d + c.snap_protrusion_mm * mm))]
+    return seg
 
 
 def _loop_lines(points):
@@ -123,11 +140,7 @@ def geometry(context):
             if not c.enabled:
                 continue
             m = matrix_fn(c.u * mm, c.v * mm, c.rotation_deg)
-            seg = _loop_lines(connector_outline(m, c.kind, c.width_mm * mm, c.height_mm * mm))
-            side = 1.0 if c.pin_side == 'A' else -1.0
-            tip = m @ Vector((0.0, 0.0, side * c.length_mm * mm * 0.5))
-            seg += [m.translation.copy(), tip]
-            lines.append((CONNECTOR_LINE, seg))
+            lines.append((CONNECTOR_LINE, connector_lines(m, c, mm)))
     return fills, lines
 
 

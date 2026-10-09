@@ -6,7 +6,7 @@
 
 Nothing here creates Blender data-blocks; every function works on ``bmesh``
 objects owned by the caller. The capping logic is the legacy
-``cap_single_object_hollow_style`` (ops_split.py) moved here without edit mode
+``cap_single_object_hollow_style`` (ops_split.py, removed in Phase 3) moved here without edit mode
 and without the world-axis assumption: loops are found on the actual cut plane
 and nested in the plane's own 2D basis, so any plane normal works.
 """
@@ -96,6 +96,71 @@ def bm_diagonal(bm):
 
 def bm_volume(bm):
     return abs(bm.calc_volume(signed=False))
+
+
+# Grid of the ray integration in winding_volume (rays per bbox side); offsets avoid mesh-aligned rays
+WINDING_GRID = 96
+_WINDING_JITTER = (0.3819660, 0.6180340)
+
+
+def winding_volume(bm, grid=WINDING_GRID, bounds=None):
+    """Volume of the region a mesh encloses with winding number > 0 (overlaps counted once).
+
+    Integrates along ``grid`` x ``grid`` parallel rays (+Z) over the XY bounds
+    (``bounds`` = (x0, x1, y0, y1, z0), default the mesh's): every surface
+    crossing changes the winding number by +-1 (by the face normal), and the
+    ray length where it is positive is summed. For intersecting shells this is
+    the volume of their union, independent of any boolean solver; it is a
+    sampled estimate (comparable between meshes only on the same ``bounds``).
+    Inward-facing cavity shells subtract as they should.
+    """
+    from mathutils.bvhtree import BVHTree
+    if not bm.faces:
+        return 0.0
+    if bounds is None:
+        bounds = bm_bounds(bm)
+    x0, x1, y0, y1, z0 = bounds
+    dx, dy = (x1 - x0) / grid, (y1 - y0) / grid
+    if dx <= 0.0 or dy <= 0.0:
+        return 0.0
+    bvh = BVHTree.FromBMesh(bm)
+    scale = max(x1 - x0, y1 - y0, 1e-9)
+    start_z = z0 - 0.01 * scale
+    eps = 1e-7 * scale
+    up = Vector((0.0, 0.0, 1.0))
+    total = 0.0
+    for i in range(grid):
+        x = x0 + (i + _WINDING_JITTER[0]) * dx
+        for j in range(grid):
+            origin = Vector((x, y0 + (j + _WINDING_JITTER[1]) * dy, start_z))
+            winding, inside_from, length = 0, None, 0.0
+            last_z, last_sign = None, 0
+            for _ in range(100000):
+                hit, normal, _index, _dist = bvh.ray_cast(origin, up)
+                if hit is None:
+                    break
+                sign = -1 if normal.z > 0.0 else 1      # entering a solid: normal against the ray
+                # The same crossing reported twice (ray through a shared edge or vertex)
+                if not (last_z is not None and sign == last_sign and hit.z - last_z < 10.0 * eps):
+                    before = winding
+                    winding += sign
+                    if before <= 0 < winding:
+                        inside_from = hit.z
+                    elif winding <= 0 < before and inside_from is not None:
+                        length += hit.z - inside_from
+                        inside_from = None
+                    last_z, last_sign = hit.z, sign
+                origin = Vector((origin.x, origin.y, hit.z + eps))
+            total += length
+    return total * dx * dy
+
+
+def bm_bounds(bm):
+    """(x0, x1, y0, y1, z0) of the vertices (for winding_volume)."""
+    xs = [v.co.x for v in bm.verts]
+    ys = [v.co.y for v in bm.verts]
+    zs = [v.co.z for v in bm.verts]
+    return min(xs), max(xs), min(ys), max(ys), min(zs)
 
 
 def bm_is_manifold(bm):

@@ -25,15 +25,17 @@ from a modal timer with progress feedback; ``build`` runs it to the end. All
 stack data is read into plain values before the first yield.
 """
 
+import math
 from dataclasses import dataclass, field
 
 import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 from ..connectors import apply as conn_apply
 from ..connectors import fit, placement
+from ..connectors import shapes as conn_shapes
 from ..core import boolean, log, meshlib, naming, progress, units
 from ..model import stack as stack_api
 from . import plane, stroke
@@ -409,36 +411,130 @@ def analyse_shells(bm, specs):
 # Connectors
 # ---------------------------------------------------------------------------
 
+# Per-connector values beyond kind / size / position (props name -> ConnectorSpec name, factor)
+EXTRA_FIELDS = (("taper_pct", "taper", 0.01, False), ("embed_pct", "embed", 0.01, False),
+                ("chamfer_mm", "chamfer", 1.0, True), ("snap_count", "snap_count", 1, False),
+                ("snap_diameter_mm", "snap_diameter", 1.0, True),
+                ("snap_protrusion_mm", "snap_protrusion", 1.0, True))
+
+
 def make_spec(obj, cut, scene, label, u_mm, v_mm, rotation_deg, kind, width_mm, height_mm, length_mm,
-              clearance_mm, pin_side, spec=None):
+              clearance_mm, pin_side, spec=None, custom=None, **extra):
     """ConnectorSpec (world space, BU) of one connector on ``cut``; lengths given in mm.
 
     ``spec``: the cut's PlaneCut/StrokeCut if already built (saves rebuilding a stroke cutter).
+    ``extra``: connector props of EXTRA_FIELDS (taper_pct, embed_pct, chamfer_mm, snap_*) in
+    their UI units; ``custom``: shapes.CustomShape of a CUSTOM connector.
     """
     mm = units.mm_to_scene(1.0, scene)
     spec = spec if spec is not None else cut_spec(obj, cut, scene)
+    values = {}
+    for prop, name, factor, is_length in EXTRA_FIELDS:
+        if prop in extra:
+            values[name] = extra.pop(prop) * (mm if is_length else factor)
+    if extra:
+        raise TypeError(f"unknown connector values {sorted(extra)}")
     return conn_apply.ConnectorSpec(
         label=label, matrix=spec.matrix(u_mm * mm, v_mm * mm, rotation_deg),
         kind=kind, width=width_mm * mm, height=height_mm * mm, length=length_mm * mm,
-        clearance=clearance_mm * mm, gap=cut.gap_mm * mm, pin_positive=(pin_side == 'A'), cut_uid=cut.uid)
+        clearance=clearance_mm * mm, gap=cut.gap_mm * mm, pin_positive=(pin_side == 'A'), cut_uid=cut.uid,
+        custom=custom, **values)
+
+
+def connector_values(c):
+    """Plain values of a connector (or the new-connector template) for make_spec / auto placement:
+    {kind, width_mm, height_mm, length_mm, taper_pct, ...} (no position, side or clearance)."""
+    out = {"kind": c.kind, "width_mm": c.width_mm, "height_mm": c.height_mm, "length_mm": c.length_mm}
+    for prop, _name, _factor, _is_length in EXTRA_FIELDS:
+        out[prop] = getattr(c, prop)
+    return out
+
+
+def custom_shape_of(obj, depsgraph=None):
+    """(shapes.CustomShape, "") of a custom connector object (evaluated mesh, its local space), or
+    (None, reason)."""
+    if obj is None:
+        return None, "no custom mesh object chosen"
+    if obj.type != 'MESH':
+        return None, f"custom connector '{obj.name}' is not a mesh object"
+    bm = bmesh.new()
+    try:
+        if depsgraph is not None:
+            bm.from_object(obj, depsgraph)
+        else:
+            bm.from_mesh(obj.data)
+        return conn_shapes.custom_shape(bm, obj.name)
+    finally:
+        bm.free()
 
 
 def default_clearance(settings):
     return settings.clearance_mm if settings is not None else 0.2
 
 
-def connector_specs(obj, cuts, scene, settings, specs=None):
-    """ConnectorSpec list (world space, BU) for the enabled connectors of ``cuts``."""
+def connector_specs(obj, cuts, scene, settings, specs=None, warnings=None, depsgraph=None):
+    """ConnectorSpec list (world space, BU) for the enabled connectors of ``cuts``.
+
+    A CUSTOM connector whose mesh is missing or unusable (shapes.custom_shape) is
+    left out with a message in ``warnings``.
+    """
     specs = specs if specs is not None else cut_specs(obj, cuts, scene)
+    shapes_by_name = {}
     out = []
     for cut, spec in zip(cuts, specs):
         for i, c in enumerate(cut.connectors):
             if not c.enabled:
                 continue
+            label = f"{cut.name} connector {i + 1}"
+            custom = None
+            if c.kind == 'CUSTOM':
+                key = c.custom_object.name if c.custom_object is not None else ""
+                if key not in shapes_by_name:
+                    shapes_by_name[key] = custom_shape_of(c.custom_object, depsgraph)
+                custom, why = shapes_by_name[key]
+                if custom is None:
+                    if warnings is not None:
+                        warnings.append(f"{label}: {why}, skipped")
+                    continue
             clearance = c.clearance_mm if c.clearance_mm >= 0.0 else default_clearance(settings)
-            out.append(make_spec(obj, cut, scene, f"{cut.name} connector {i + 1}", c.u, c.v, c.rotation_deg,
-                                 c.kind, c.width_mm, c.height_mm, c.length_mm, clearance, c.pin_side, spec))
+            values = connector_values(c)
+            out.append(make_spec(obj, cut, scene, label, c.u, c.v, c.rotation_deg,
+                                 values.pop("kind"), values.pop("width_mm"), values.pop("height_mm"),
+                                 values.pop("length_mm"), clearance, c.pin_side, spec, custom=custom,
+                                 **values))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Dowel parts
+# ---------------------------------------------------------------------------
+
+# Dowel parts lie flat (axis along world X) in a row next to the source: DOWEL_MARGIN_MM beyond
+# its +X side, DOWEL_SPACING_MM apart along Y, resting on the source's lowest Z
+DOWEL_MARGIN_MM = 5.0
+DOWEL_SPACING_MM = 3.0
+
+
+def dowel_matrix(dowel, index, source_bounds, scene):
+    """World matrix of dowel part ``index`` (local Z = dowel axis -> world X), see DOWEL_* above."""
+    (x0, x1, y0, y1, z0), _z1 = source_bounds
+    mm = units.mm_to_scene(1.0, scene)
+    r = dowel.diameter * 0.5
+    center = Vector((x1 + DOWEL_MARGIN_MM * mm + dowel.length * 0.5,
+                     y0 + r + index * (dowel.diameter + DOWEL_SPACING_MM * mm), z0 + r))
+    return Matrix.Translation(center) @ Matrix.Rotation(math.pi * 0.5, 4, 'Y')
+
+
+def dowel_object(name, dowel, matrix):
+    """New (unlinked) mesh object of a dowel part; the mesh is in world space, identity transform."""
+    bm = bmesh.new()
+    try:
+        conn_shapes.dowel_bmesh(bm, dowel.diameter, dowel.length, dowel.chamfer, matrix)
+        mesh = bpy.data.meshes.new(name)
+        bm.to_mesh(mesh)
+    finally:
+        bm.free()
+    return bpy.data.objects.new(name, mesh)
 
 
 # ---------------------------------------------------------------------------
@@ -550,14 +646,16 @@ def build_steps(obj):
     scene = context.scene
     settings = getattr(scene, naming.SCENE_SETTINGS, None)
     specs = cut_specs(obj, cuts, scene)
-    conn_specs = connector_specs(obj, cuts, scene, settings, specs)
+    spec_warnings = []
+    conn_specs = connector_specs(obj, cuts, scene, settings, specs, spec_warnings,
+                                 context.evaluated_depsgraph_get())
     barriers = {s.uid: s.barrier() for s in specs}
     quality = settings.boolean_quality if settings is not None else 'AUTO'
     cut_ids = ",".join(c.uid for c in cuts)
     max_step = units.mm_to_scene(FIT_STEP_MM, scene)
     del stack, cuts, settings
 
-    warnings, infos, booleans = [], [], []
+    warnings, infos, booleans = spec_warnings, [], []
     prog = progress.Progress(2 * len(specs), f"{naming.ADDON_NAME} Build")
     prog.begin()
     bm = source_bmesh(obj, context.evaluated_depsgraph_get())
@@ -567,6 +665,7 @@ def build_steps(obj):
         if not bm.faces:
             raise BuildError("Source mesh has no faces")
         source_bvh = BVHTree.FromBMesh(bm)  # keeps its own copy of the geometry
+        source_bounds = meshlib.bm_bounds(bm), max(v.co.z for v in bm.verts)
         uncrossed, self_intersect = analyse_shells(bm, specs)
         if uncrossed:
             infos.append(f"{uncrossed} separate shell(s) not crossed by any cut stay whole in the part "
@@ -593,9 +692,9 @@ def build_steps(obj):
         pieces = yield from iter_cut_pieces(consumed, specs, warnings, quality, prog, self_intersect, booleans)
         if len(pieces) < 2:
             raise BuildError("The cuts do not intersect the object")
-        pins, sockets, conn_warnings, overlapping = conn_apply.assign(
-            [p.bm for p in pieces], conn_specs, source_bvh, barriers, max_step)
-        warnings += conn_warnings
+        assignment = conn_apply.assign([p.bm for p in pieces], conn_specs, source_bvh, barriers, max_step)
+        pins, sockets, overlapping = assignment.pins, assignment.sockets, assignment.overlapping
+        warnings += assignment.warnings
         operations = conn_apply.operations(pins, sockets)
         prog.set_total(prog.done + len(operations))
 
@@ -611,6 +710,16 @@ def build_steps(obj):
             part[naming.PROP_SOURCE] = obj.name
             part[naming.PROP_SOURCE_OBJECT] = obj
             part[naming.PROP_CUT_IDS] = cut_ids
+            coll.objects.link(part)
+            parts.append(part)
+        for k, dowel in enumerate(assignment.dowels):
+            name = f"{obj.name}{naming.DOWEL_SUFFIX}{k + 1}"
+            names.append(name)
+            part = dowel_object(name, dowel, dowel_matrix(dowel, k, source_bounds, scene))
+            part[naming.PROP_SOURCE] = obj.name
+            part[naming.PROP_SOURCE_OBJECT] = obj
+            part[naming.PROP_CUT_IDS] = cut_ids
+            part[naming.PROP_DOWEL] = dowel.label
             coll.objects.link(part)
             parts.append(part)
         for index, operand, operation in operations:

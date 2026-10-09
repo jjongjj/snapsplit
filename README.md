@@ -2,20 +2,79 @@
 
 **SplitForge** (temporary working name) is a GPL-3.0-or-later fork of
 [SnapSplit](https://github.com/Betakontext/snapsplit) by Christoph Medicus (Betakontext).
-It adds a non-destructive workflow on top of SnapSplit: a per-object **cut stack** (Draft
-mode: add / edit / disable / reorder planar cuts, then **Build**; Easy mode: one click cut
-+ build), pin/socket **connector records** per cut (position, size, rotation, pin side,
-clearance), a **Build** that never modifies the original object (results go to the
-collection `SplitForge_Build_<object>`), and **Export** of all parts to STL/OBJ/FBX in
-millimeters. The original SnapSplit tools stay available under the collapsed **Legacy**
-sub-panel until they are replaced. N-panel tab: **SplitForge**.
+It turns SnapSplit into a non-destructive cut-and-connect workflow for 3D printing.
+N-panel tab: **SplitForge**.
+
+- **Cut stack** per object (Draft mode): planar cuts (X/Y/Z, any angle, gap/kerf) and curved
+  cuts drawn as a stroke in the viewport; add / edit / disable / reorder, then **Build**.
+  Easy mode: one click cut + connectors + build.
+- **Build** never modifies the original object: the parts go to the collection
+  `SplitForge_Build_<object>` and are replaced on every rebuild (progress in the status bar,
+  Esc keeps the previous result). Booleans are verified and fall back between solvers
+  (Settings > Booleans: Auto / Accurate / Fast).
+- **Connectors** per cut, edited one by one (type, size, position U/V, rotation, pin side,
+  clearance): placed automatically (**Distribute**: line or grid, each position checked in 3D
+  against the surface, the other cuts and a curved seam), by **clicking** on the seam in the
+  viewport (S flips the pin side, each click is one undo step), or by typing U/V.
+- **Export** of all parts (and dowels) to STL/OBJ/FBX in millimeters.
+
+### Connector types
+
+| Type | Pin part | Socket part | Per-type values |
+|---|---|---|---|
+| Cylinder pin | round pin | hole, + clearance on every side | diameter, length, insert depth, tip chamfer |
+| Rectangular tenon | box tenon (cannot rotate) | box hole + clearance | width, height |
+| Dovetail | tapered tenon (narrower tip, self-centering) | tapered hole, clearance measured normal to the slanted faces | taper % |
+| Snap pin / snap tenon / snap dovetail | the above + snap bumps around the protruding half | matching dimples (bump + clearance) where the bumps sit after assembly | bumps, bump diameter, bump height |
+| Custom mesh | any closed mesh object, scaled into width x height x length (its local Z is the insertion direction, lowest Z the embedded end) | the mesh offset outward along its normals by the clearance (not a scale) | mesh object ("Use Object Size" copies its dimensions) |
+| Dowel (separate part) | a socket too | a socket | diameter, length, end chamfer |
+
+Clearance: per connector, or the scene default from the material profile (PLA 0.20, PETG 0.30,
+ABS/ASA 0.25, TPU 0.35, SLA 0.10 mm per side). Sockets are as deep as the protruding pin plus
+the clearance; with a cut gap the sockets follow the pin as it sits after the gap is closed.
+
+**Dowels** are printed separately: both parts get a socket of half the dowel length plus the
+clearance, and Build adds one part `<object>_Dowel_<n>` per dowel (exact length and diameter,
+optional end chamfer) lying flat along X next to the object, resting on its lowest point. Lying
+flat puts the layer lines along the dowel, so the seam's shear load does not split it between
+layers. Dowel parts are exported with the other parts.
+
+A custom mesh must be a closed manifold solid (not flat, at most 20,000 faces); otherwise Build
+skips that connector with a warning and Distribute / click placement refuse it with the reason.
+
+### Legacy SnapSplit tools
+
+The original SnapSplit operators and panel (Planar Split, Freehand Cut, Add/Place connectors,
+Align Faces, the split preview) were removed in Phase 3 after the new pipeline reached feature
+parity (`tests/cases/test_legacy_parity.py`); see `docs/PLAN.md` (decision 4). Files saved with
+them still open: their settings remain as unused custom properties, and parts they created are
+ordinary meshes. The upstream description below documents the original add-on (credit) and does
+not describe the current UI.
+
+### Languages
+
+The UI (operator, property and panel labels) is translated to German and Korean
+(`splitforge/localization.py`); Blender's interface language applies it.
+
+### Package structure
+
+```text
+splitforge/
+├── blender_manifest.toml, __init__.py, prefs.py, localization.py
+├── core/        units, validation, booleans (verified, solver fallback), mesh helpers, progress, naming
+├── model/       cut stack PropertyGroups and stack operations
+├── cuts/        plane and stroke cutters, Build
+├── connectors/  solids (all types), placement, automatic distribution, 3D fit checks, apply
+├── ops/         stack, plane adjust, stroke, connectors (incl. click placement), Build, Export
+└── ui/          panel, viewport overlay
+```
 
 Credit for the original segmentation, capping and connector tools goes to the SnapSplit
 author; the upstream description follows.
 
 ---
 
-# SnapSplit
+# SnapSplit (upstream description, historical)
 
 SnapSplit is a Blender add-on for splitting 3D models into printable parts and creating matching connectors and sockets. It is useful for models that exceed your print bed, modular sculptures, props, prototypes, and other projects that need to be assembled after printing.
 
@@ -82,9 +141,8 @@ SplitForge reads millimeters exactly as Blender displays them (1 unit = Unit Sca
 so with other settings the add-on's mm values still match the viewport; the panel shows the
 effective "1 unit = … mm" and exported STL/OBJ files are always written in millimeters.
 
-Open the **3D Viewport sidebar** with **N**, then select the **SplitForge** tab. The new
-Draft/Easy workflow is the main panel; the original SnapSplit tools are in its collapsed
-**Legacy** sub-panel.
+Open the **3D Viewport sidebar** with **N**, then select the **SplitForge** tab (the
+Draft/Easy workflow; the SnapSplit panel described below was removed in SplitForge Phase 3).
 
 ### Mesh preparation and quality checks
 

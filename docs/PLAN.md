@@ -9,7 +9,9 @@ Blender 대상: 4.2 LTS ~ 5.x (검증 환경: 4.5.5 LTS, 5.2.2 LTS, Windows exe�
 > 스택은 `Object.splitforge_stack`, 새 전역 설정은 `Scene.splitforge`, 파트 프로퍼티는 `["splitforge_source"]`·`["splitforge_cut_ids"]`.
 > 레거시 `snapsplit.*` 오퍼레이터와 `Scene.snapsplit`는 Phase 3까지 이름 유지. 아래 본문의 `SNAP_PG_*`·`snapsplit.<새 op>`·
 > `obj.snapsplit_stack` 표기는 이 규칙으로 읽는다. 업스트림 SnapSplit(Betakontext)은 manifest/README에 크레딧(GPL 유지).
-> 레거시 UI는 Phase 3까지 새 메인 패널의 접힌 "Legacy" 서브패널로 유지(결정 4).
+> 레거시 UI는 Phase 3까지 새 메인 패널의 접힌 "Legacy" 서브패널로 유지(결정 4) → **Phase 3에서 제거**(동등성 테스트 통과 후,
+> `test_legacy_parity.py`): `snapsplit.*` 오퍼레이터·`SNAP_*` 타입·`Scene.snapsplit`·Legacy 패널·Align Faces·분할 프리뷰 삭제.
+> 옛 파일을 여는 데 필요한 코드는 없다(등록되지 않은 PropertyGroup 값은 Blender가 ID 커스텀 프로퍼티로 보존, 옛 파트는 일반 메시).
 
 ---
 
@@ -121,20 +123,21 @@ splitforge/                   # (Phase 0까지 snapsplit/)
     polygon.py                # 폴리곤 영역 제거 커터
     build.py                  # Build 파이프라인: 원본 복사 → 컷 순차 적용 → 캡 → 커넥터 → 컬렉션
   connectors/
-    shapes.py                 # 기존 create_cyl_pin/rect_tenon/dovetail/custom/sphere 이관
+    shapes.py                 # (Phase 3) 커넥터 = 솔리드 목록(Loft: ROUND/RECT 단면 스윕, Ball, MeshSolid). Build와 fit 검사가 같은 솔리드를 씀
     placement.py              # 시임 프레임 + UV 위치 → 월드 변환(단일 진실)
     apply.py                  # 핀 UNION/소켓 DIFFERENCE, 클리어런스, 양면 도웰
   ops/
     ops_stack.py              # 스택 CRUD, Build, Easy 모드
     ops_cut_plane.py          # 평면 컷 추가/조정(모달 gizmo)
     ops_cut_stroke.py         # 스트로크 모달(ops_freehand에서 입력·드로잉 부분 발췌)
-    ops_connector.py          # 커넥터 추가/클릭 배치/편집
+    ops_connector.py          # 커넥터 추가/자동 배치/삭제/커스텀 크기
+    ops_connector_click.py    # (Phase 3) 클릭 배치 모달
     ops_export.py             # 일괄 STL/OBJ/FBX
     ops_validate.py
   ui/
     panel.py (패널 + UIList), overlay.py (gpu 오버레이 프리뷰), legacy.py (레거시 패널, 구 ui.py)
-  legacy/ (Phase 3 말까지 유지) ops_split.py, ops_connectors.py, ops_align.py, ops_freehand.py, seam_data.py, profiles.py
-  localization.py
+  (legacy ops_split/ops_connectors/ops_align/ops_freehand/seam_data/profiles/utils.py, ui/legacy.py: Phase 3에서 삭제)
+  localization.py             # de_DE·ko_KR 전체 UI + 다른 로캘은 남은 공통 항목
 tests/
   run_tests.py                # 호스트 파이썬: Blender 버전별 실행, 종료코드 집계
   blender_runner.py           # Blender 안: 확장 등록, cases 발견·실행, JSON 보고
@@ -153,17 +156,18 @@ tests/
 저장 위치: **원본 오브젝트**에 `obj.snapsplit_stack`(PointerProperty → `SNAP_PG_CutStack`). 파일 저장/undo에 자동 포함. 전역 UI 상태는 `scene.snapsplit`(기존)에 유지.
 
 ```python
-class SNAP_PG_Connector(PropertyGroup):
+class SNAP_PG_Connector(PropertyGroup):        # Phase 3 실제 필드
     enabled: Bool
     kind: Enum[CYL_PIN, RECT_TENON, DOVETAIL, SNAP_PIN, SNAP_TENON, SNAP_DOVETAIL, CUSTOM, DOWEL]
-    u, v: Float              # 시임 평면 내 2D 위치(mm, 시임 프레임 기준)
+    u, v: Float              # 시임 평면 내 2D 위치(mm, 시임 프레임 기준; 곡선 시임은 펼친 리본 좌표)
     rotation_deg: Float      # 평면 내 회전
-    width_mm, height_mm, length_mm: Float
-    scale: FloatVector(3)
-    pin_side: Enum[A, B]     # 핀이 붙는 파트
-    clearance_mm: Float      # -1 = 프로필 기본값
+    width_mm, height_mm, length_mm: Float   # 길이 = 전체(도웰 포함), embed_pct만큼 핀 파트 안
+    pin_side: Enum[A, B]     # 핀이 붙는 파트(도웰은 무시)
+    clearance_mm: Float      # -1 = 씬 기본값(재질 프로필)
+    embed_pct, taper_pct, chamfer_mm: Float
+    snap_count: Int; snap_diameter_mm, snap_protrusion_mm: Float
     custom_object: Pointer(Object)
-    double_sided: Bool       # 도웰: 양쪽 소켓 + 별도 도웰 파트
+    # (원안의 scale / double_sided는 두지 않음: CUSTOM은 width/height/length로 크기, DOWEL 종류 = 양면)
 
 class SNAP_PG_Cut(PropertyGroup):
     name: String; enabled: Bool
@@ -197,9 +201,9 @@ class SNAP_PG_CutStack(PropertyGroup):
 | | `snapsplit.cut_adjust_plane` | 평면 origin/normal 모달 조정(마우스/휠, X/Y/Z 스냅, Shift로 축 정렬) |
 | | `snapsplit.build` | Draft 빌드(Build 파이프라인). `rebuild=True`면 기존 결과 교체 |
 | | `snapsplit.easy_cut` | Easy 모드: 컷 1개 + 기본 커넥터 → 즉시 빌드 |
-| 커넥터 | `snapsplit.connector_add_auto` (LINE/GRID), `connector_add_click`(모달, 클릭마다 `undo_push`), `connector_remove`, `connector_mirror_side` | |
+| 커넥터 | `splitforge.connector_add_auto` (LINE/GRID), `connector_add`, `connector_add_click`(모달, 클릭마다 `undo_push`), `connector_remove`, `connector_custom_size` | (Phase 3) `connector_mirror_side`는 만들지 않음: 커넥터별 Pin side로 충분 |
 | 검증/출력 | `snapsplit.validate`, `snapsplit.fix_transforms`, `snapsplit.fix_units`, `snapsplit.export_parts` (STL/OBJ/FBX, 파트별 파일) | |
-| 레거시 | 기존 `planar_split`, `add_connectors`, `place_connectors_click`, `freehand_cut`, `align_faces`… | Phase 3까지 "Legacy" 서브패널에 유지 |
+| 레거시 | 기존 `planar_split`, `add_connectors`, `place_connectors_click`, `freehand_cut`, `align_faces`… | Phase 3에서 삭제(위 상단 결정) |
 
 ### 4.4 불리언 파이프라인 (`core/boolean.py`) — Phase 2 구현
 
@@ -230,11 +234,22 @@ A = 조각 − 오른쪽(곡선+갭/2), B = 조각 − 왼쪽(곡선−갭/2). �
 갭보다 가까이 되돌아옴(+오프셋이 −오프셋의 왼쪽에 있지 않음)은 메시지와 함께 거부. 커넥터 프레임: u = 호 길이(중앙 0), v = d 방향 깊이,
 핀 축 = t × d. 리본 BVH는 깊이 방향으로 잘게 나눈다(1:100 가는 삼각형에서 BVH 최근접 오차 ~0.01 mm, float32).
 
-양면 도웰: 두 파트 모두 소켓 DIFFERENCE, 도웰 본체는 별도 파트 오브젝트(공차는 소켓에 적용)로 결과 컬렉션에 포함.
+양면 도웰(Phase 3, 사용자 결정 6): 두 파트 모두 소켓 DIFFERENCE(깊이 L/2 + 공차, 지름 + 2×공차), 도웰 본체는 별도 파트
+`<원본>_Dowel_<n>`(정확한 길이·지름, 양 끝 선택적 모따기)로 결과 컬렉션에 포함·Export. 배치: 원본 +X 쪽 5 mm 밖에 **눕혀서**(축 = 월드 X)
+Y 방향으로 3 mm 간격, 원본 최저 Z에 놓임 — 층이 도웰 축을 따라 쌓여 시임의 전단이 층 사이를 가르지 않는다.
+
+커넥터 솔리드(Phase 3, `connectors/shapes.py`): 공차는 각 면에 수직(마이터 오프셋): 프리즘은 사방 +c, 테이퍼 면은 같은 높이에서
+c/cos(경사), 스냅 딤플은 반지름 +c, 커스텀 메시는 정점 법선 × 셸 계수 오프셋(스케일 아님). 소켓은 조립 후 핀 위치(갭만큼 이동)를 따른다.
+한 커넥터 안에서 겹치는 솔리드(스냅 돌기와 핀, 오프셋한 커스텀 메시)는 먼저 작은 합집합(`boolean.unite_bm`)으로 하나의 깨끗한
+솔리드로 만든다 → 큰 파트의 불리언은 평범한 EXACT(실패 시에만 그 파트를 자기교차 처리로). 서로 겹치는 커넥터는 이전처럼 자기교차 처리.
+도브테일은 "삽입 방향으로 좁아지는 테이퍼 테논"(밀어서 조립)만: 레거시의 음수 테이퍼(끝이 넓음)·Span Axis/Hard-side Cut(옆으로
+밀어 넣는 레일)은 이관하지 않음 — 법선 방향 조립이 불가능하고 원본 밖으로 나가는 형상이라 fit 검사와 맞지 않는다(열린 결정).
 
 ### 4.5 Undo 안전 전략
 
-- 모든 오퍼레이터 `{'REGISTER','UNDO'}`. 모달 클릭 배치는 클릭마다 `bpy.ops.ed.undo_push(message=...)`.
+- 모든 오퍼레이터 `{'REGISTER','UNDO'}`. 예외: 모달 클릭 배치(`connector_add_click`)는 `{'REGISTER','BLOCKING'}`이고 클릭마다
+  `bpy.ops.ed.undo_push(message=...)` — UNDO 플래그가 있으면 끝날 때 빈 단계가 하나 더 쌓여 Ctrl+Z 한 번이 아무것도 안 한다.
+  모달 중 Ctrl+Z/Ctrl+Shift+Z는 통과(클릭 하나씩 되돌림).
 - Build는 **원본을 절대 변경하지 않는다**(복사본에서 작업). 변환 적용도 복사본에만. 사용자가 원하면 `fix_transforms`를 명시 실행.
 - depsgraph/draw 핸들러에서 데이터블록 생성·삭제 금지. 프리뷰는 gpu 오버레이(`SpaceView3D.draw_handler_add`)로만 그린다(평면 오브젝트 프리뷰 제거). 모달 중 데이터는 파이썬 객체에만 보관.
 - 핸들러·드로우 핸들러는 `unregister`에서 반드시 제거(ops_freehand의 `_ACTIVE_OPERATORS` 패턴 유지).
@@ -249,7 +264,9 @@ A = 조각 − 오른쪽(곡선+갭/2), B = 조각 − 왼쪽(곡선−갭/2). �
 4. **Connectors**(선택된 컷): `UIList` + 자동 배치(분포/개수/마진) + 클릭 배치 + 선택 커넥터 속성(타입, 크기, 회전, 핀 측, 클리어런스, 커스텀 메시, 양면).
 5. **Build / Export**: Build, Rebuild, 결과 컬렉션 표시, Export(포맷·폴더).
 6. **Settings**(접힘): 재질 프로필/공차, 솔버, voxel 폴백, 디버그 로그.
-7. **Legacy**(접힘, Phase 3까지): 기존 패널 그대로.
+7. ~~Legacy~~(Phase 3에서 제거).
+(Phase 3) Connectors 서브패널: "New connectors" 상자(종류별 필드 = 새 커넥터 템플릿 `Scene.splitforge.new_connector`),
+Distribute / Click / + / −, 커넥터 목록, 활성 커넥터 상자(종류별 필드 + U/V·회전·핀 쪽·공차, 커스텀 메시 문제 표시).
 
 ### 4.7 테스트 하니스
 
@@ -291,7 +308,7 @@ A = 조각 − 오른쪽(곡선+갭/2), B = 조각 − 왼쪽(곡선−갭/2). �
 3. 최소 지원 버전: manifest 4.2 유지하되 자동 검증은 4.4/4.5/5.2만 할지, 4.2 LTS를 설치해 검증 대상에 넣을지.
 4. ~~레거시 공개 유지 기간~~ → **결정됨**: Phase 3까지 유지, 새 메인 패널 아래 접힌 "Legacy" 서브패널.
 5. ~~곡선 컷 방식~~ → **결정됨(2026-10-09)**: 뷰 투영 리본(그린 스트로크를 뷰 방향으로 압출, 레코드는 뷰와 무관한 로컬 폴리라인 + 방향). 4.4절.
-6. 양면 도웰의 도웰 본체를 결과 컬렉션에 "출력용 파트"로 포함할지, 규격 시판 도웰(예: Ø3mm 핀) 가정으로 소켓만 만들지.
+6. ~~양면 도웰의 도웰 본체~~ → **결정됨(사용자)**: 도웰은 별도 출력용 파트(결과 컬렉션, Export 포함). 눕혀서 배치(4.4절).
 7. ~~큰 자기교차 메시에서 EXACT_SELF가 느림~~ → **결정됨(2026-10-09, 사용자)**: 씬 설정 `boolean_quality`(Settings 패널 "Booleans").
    Auto(기본) = 대상 면 > 200,000이면 Fast 순서, 아니면 Accurate; Accurate = EXACT → EXACT_SELF(셸 교차 시 처음부터) → MANIFOLD → float → voxel;
    Fast = MANIFOLD 먼저(검증), 실패 시 Accurate 체인. 트레이드오프: MANIFOLD는 교차하는 셸(Suzanne 눈↔머리)을 합치지 않고 겹친 채로 둔다

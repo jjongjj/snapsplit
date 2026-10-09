@@ -16,8 +16,11 @@ from ..cuts import plane, stroke
 
 CUT_FIELDS = ("enabled", "kind", "origin", "normal", "tangent", "direction", "gap_mm", "cap", "distribution",
               "connector_count", "connector_rows", "margin_pct")
-CONNECTOR_FIELDS = ("enabled", "kind", "u", "v", "rotation_deg", "width_mm", "height_mm", "length_mm",
-                    "pin_side", "clearance_mm")
+# Connector type and size (copied from the scene's new-connector template onto new connectors)
+TEMPLATE_FIELDS = ("kind", "rotation_deg", "width_mm", "height_mm", "length_mm", "pin_side", "clearance_mm",
+                   "embed_pct", "taper_pct", "chamfer_mm", "snap_count", "snap_diameter_mm",
+                   "snap_protrusion_mm", "custom_object")
+CONNECTOR_FIELDS = ("enabled", "u", "v") + TEMPLATE_FIELDS
 
 
 def get_stack(obj):
@@ -185,9 +188,18 @@ def move_cut(obj, index, direction):
     return target
 
 
-def copy_connector(src, dst):
-    for f in CONNECTOR_FIELDS:
+def copy_connector(src, dst, fields=CONNECTOR_FIELDS):
+    for f in fields:
         setattr(dst, f, getattr(src, f))
+
+
+def add_connector(cut, template, u, v):
+    """Append a connector at (u, v) mm with the template's type and size; make it active. Returns it."""
+    c = cut.connectors.add()
+    copy_connector(template, c, TEMPLATE_FIELDS)
+    c.u, c.v = u, v
+    cut.active_connector = len(cut.connectors) - 1
+    return c
 
 
 def duplicate_cut(obj, index=-1):

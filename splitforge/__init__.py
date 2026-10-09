@@ -45,41 +45,29 @@ from .core.naming import ADDON_NAME
 
 # Import submodules
 from . import localization  # translation data (DICTIONARY), no register() of its own
-from . import utils
-from . import profiles
 from . import prefs
-from . import ops_split
-from . import ops_connectors
-from . import ops_align
-from . import ops_freehand
 from .model import props as model_props
-from .ops import ops_stack, ops_cut_plane, ops_cut_stroke, ops_connector, ops_build, ops_export
+from .ops import (ops_stack, ops_cut_plane, ops_cut_stroke, ops_connector, ops_connector_click, ops_build,
+                  ops_export)
 from .ui import overlay as ui_overlay
 from .ui import panel as ui_panel
-from .ui import legacy as ui_legacy  # "Legacy" sub-panel of the main panel (until Phase 3)
 
 # Set to False for release builds to skip the development hot-reload.
 DEV_RELOAD = False
 
 _modules = [
     localization,
-    utils,
-    profiles,
     prefs,
-    ops_split,
-    ops_connectors,
-    ops_align,
-    ops_freehand,
     model_props,
     ops_stack,
     ops_cut_plane,
     ops_cut_stroke,
     ops_connector,
+    ops_connector_click,
     ops_build,
     ops_export,
     ui_overlay,
     ui_panel,
-    ui_legacy,
 ]
 
 # Modules whose register() completed successfully (in registration order)

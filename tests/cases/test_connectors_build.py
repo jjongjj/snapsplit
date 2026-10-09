@@ -37,8 +37,8 @@ def _build(name, kind, pin_side, clearance, count=3, width=5.0, height=5.0):
     cube.name = name
     lib.select_only([cube])
     s = bpy.context.scene.splitforge
-    s.new_connector_kind = kind
-    s.new_connector_width_mm, s.new_connector_height_mm, s.new_connector_length_mm = width, height, 10.0
+    s.new_connector.kind = kind
+    s.new_connector.width_mm, s.new_connector.height_mm, s.new_connector.length_mm = width, height, 10.0
     lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='Z')
     cut = cube.splitforge_stack.cuts[0]
     cut.connector_count = count
@@ -119,7 +119,7 @@ def run(ctx):
     cube = lib.make_cube(40.0)
     cube.name = "Gap"
     lib.select_only([cube])
-    bpy.context.scene.splitforge.new_connector_kind = 'CYL_PIN'
+    bpy.context.scene.splitforge.new_connector.kind = 'CYL_PIN'
     lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='Z')
     cut = cube.splitforge_stack.cuts[0]
     cut.gap_mm = 1.0

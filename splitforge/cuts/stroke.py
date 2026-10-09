@@ -584,6 +584,25 @@ class Centerline:
         t = _unit((t0[0] + (t1[0] - t0[0]) * f, t0[1] + (t1[1] - t0[1]) * f))
         return (x0 + (x1 - x0) * f, y0 + (y1 - y0) * f), t
 
+    def uv_of(self, point):
+        """(u, v) of a world point: the arc length of the nearest curve point (the straight
+        extensions beyond the ends included) and the depth along ``d``."""
+        x, y = self.frame.to2d(point)
+        best = None
+        n = len(self.pts)
+        for i in range(n - 1):
+            (x0, y0), (x1, y1) = self.pts[i], self.pts[i + 1]
+            dx, dy = x1 - x0, y1 - y0
+            ll = dx * dx + dy * dy
+            f = 0.0 if ll == 0.0 else ((x - x0) * dx + (y - y0) * dy) / ll
+            lo = -math.inf if i == 0 else 0.0          # the first/last segment continue straight on
+            hi = math.inf if i == n - 2 else 1.0
+            f = max(lo, min(hi, f))
+            d2 = (x - x0 - f * dx) ** 2 + (y - y0 - f * dy) ** 2
+            if best is None or d2 < best[0]:
+                best = (d2, self.s[i] + f * math.sqrt(ll))
+        return best[1] - self.total * 0.5, self.frame.depth(point)
+
     def frame_at(self, u, v=0.0):
         """World (point, n, t) of the seam at (u, v)."""
         (x, y), (tx, ty) = self._at(u)

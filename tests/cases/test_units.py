@@ -2,7 +2,7 @@
 """P1-1: core/units.py follows Blender's display: 1 BU = Unit Scale meters.
 
 A millimeter value in the add-on equals what Blender shows in millimeters, whatever
-the display length unit. The legacy helpers in utils.py delegate to core/units.py.
+the display length unit.
 """
 
 import bpy
@@ -24,7 +24,6 @@ CASES = [
 
 def run(ctx):
     units = ctx.module("core.units")
-    utils = ctx.module("utils")
     us = bpy.context.scene.unit_settings
     for (system, length_unit, scale), per_mm in CASES:
         us.system = system
@@ -39,9 +38,6 @@ def run(ctx):
         # Same number Blender itself uses for a typed "25 mm" (meters / Unit Scale = BU)
         typed = bpy.utils.units.to_value('METRIC', 'LENGTH', "25 mm") / units.exact_scale(us.scale_length)
         lib.assert_close(units.mm_to_scene(25.0), typed, rel=1e-6, msg=label + " vs Blender's own conversion")
-        # Legacy helpers use the same conversion
-        lib.assert_close(utils.unit_mm(), per_mm, abs_=1e-9, msg=label + " utils.unit_mm")
 
     lib.set_scene_mm()
-    assert utils.unit_mm() == 1.0, utils.unit_mm()
-    assert utils.mm_to_scene(2.5) == 2.5, utils.mm_to_scene(2.5)
+    assert units.mm_to_scene(2.5) == 2.5, units.mm_to_scene(2.5)

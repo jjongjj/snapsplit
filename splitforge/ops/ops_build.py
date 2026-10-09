@@ -175,8 +175,7 @@ def easy_finish(op, context, obj, index, count, next_uid):
         if count > 0:
             cut.distribution = 'LINE'
             cut.connector_count = count
-            res = auto.add_auto(context, obj, cut, s.new_connector_kind, s.new_connector_width_mm,
-                                s.new_connector_height_mm, s.new_connector_length_mm)
+            res = auto.add_auto(context, obj, cut, template=s.new_connector)
             if res.dropped:
                 op.report({'WARNING'}, f"{res.dropped} connector position(s) dropped: {res.describe()}")
         result = build.build(context, obj)
