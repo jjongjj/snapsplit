@@ -1217,6 +1217,14 @@ class SNAP_OT_adjust_split_axis(Operator):
     bl_label = "Adjust split axis"
     bl_options = {'REGISTER', 'UNDO', 'BLOCKING'}
 
+    # Undo safety: this modal operator keeps NO bpy struct references between events.
+    # An undo/redo step (e.g. ed.undo run from a script or timer while the modal is
+    # active) re-reads the Scene's ID properties, so a cached `context.scene.snapsplit`
+    # would point to freed memory and reading it crashes Blender
+    # (EXCEPTION_ACCESS_VIOLATION in IDP_GetPropertyFromGroup). Only names and plain
+    # numbers are stored; the object, the preview plane and the scene settings are
+    # looked up again on every event.
+
     def invoke(self, context, event):
         """Start modal adjustment, initialize preview planes and internal state."""
         obj = context.active_object
@@ -1227,9 +1235,9 @@ class SNAP_OT_adjust_split_axis(Operator):
 
         warn_if_unapplied_transforms(obj, operator=self)
 
-        self.obj = obj
-        self.props = context.scene.snapsplit
-        self.axis = self.props.split_axis
+        props = context.scene.snapsplit
+        self._obj_name = obj.name
+        self.axis = props.split_axis
 
         min_v, max_v = world_aabb(obj)
         ax = axis_index_for(self.axis)
@@ -1238,30 +1246,28 @@ class SNAP_OT_adjust_split_axis(Operator):
 
         self.t_norm = 0.0
         try:
-            offset_scene = float(getattr(self.props, "split_offset_mm", 0.0)) * unit_mm()
+            offset_scene = float(getattr(props, "split_offset_mm", 0.0)) * unit_mm()
             half = 0.5 * (self.hi - self.lo)
             if half > 1e-12:
                 self.t_norm = max(-1.0, min(1.0, offset_scene / half))
         except Exception:
             pass
 
-        self.current_world_pos, _ = world_pos_from_norm(self.obj, self.axis, self.t_norm)
+        self.current_world_pos, _ = world_pos_from_norm(obj, self.axis, self.t_norm)
 
-        parts_cnt = max(2, int(getattr(self.props, "parts_count", 2)))
-        offset_scene = float(getattr(self.props, "split_offset_mm", 0.0)) * unit_mm()
+        parts_cnt = max(2, int(getattr(props, "parts_count", 2)))
+        offset_scene = float(getattr(props, "split_offset_mm", 0.0)) * unit_mm()
         try:
-            position_preview_planes_for_object(context, self.obj, self.axis, parts_cnt, offset_scene, force_rebuild=True)
+            position_preview_planes_for_object(context, obj, self.axis, parts_cnt, offset_scene, force_rebuild=True)
         except Exception:
             pass
 
-        lead_name = preview_plane_name_for(self.obj.name, 1)
+        self._plane_name = preview_plane_name_for(obj.name, 1)
         try:
-            self.preview_plane = create_or_get_preview_plane(context, self.obj, self.axis, lead_name)
-            self.preview_plane.matrix_world = build_preview_matrix(self.obj, self.axis, self.current_world_pos)
+            plane = create_or_get_preview_plane(context, obj, self.axis, self._plane_name)
+            plane.matrix_world = build_preview_matrix(obj, self.axis, self.current_world_pos)
         except Exception:
-            self.preview_plane = None
-
-        self._area = context.area; self._region = context.region
+            pass
 
         # Keep the preview planes visible inside solid objects while adjusting
         try:
@@ -1270,12 +1276,8 @@ class SNAP_OT_adjust_split_axis(Operator):
         except Exception:
             pass
 
-
         context.window_manager.modal_handler_add(self)
-        if self._area: self._area.tag_redraw()
-        if self._region:
-            try: self._region.tag_redraw()
-            except Exception: pass
+        _tag_redraw(context)
 
         return {'RUNNING_MODAL'}
 
@@ -1302,25 +1304,29 @@ class SNAP_OT_adjust_split_axis(Operator):
             except Exception: pass
             _disable_split_preview_and_cleanup(context)
 
-        if self._area: self._area.tag_redraw()
-        if self._region:
-            try: self._region.tag_redraw()
-            except Exception: pass
+        _tag_redraw(context)
 
         msg_ok = 'Split axis adjusted.'
         msg_cancel = 'Adjust split axis cancelled.'
         report_user(self, 'INFO', msg_cancel if cancelled else msg_ok)
 
+    def cancel(self, context):
+        """Blender-driven cancellation (file load, window closed): clean up like ESC."""
+        self.finish(context, cancelled=True)
+
     def modal(self, context, event):
         """Handle mouse/keyboard events to adjust offset and update the preview."""
-        if not self.obj or self.obj.name not in bpy.data.objects:
+        # Re-resolve everything: references from a previous event may be dangling after undo.
+        obj = bpy.data.objects.get(getattr(self, "_obj_name", ""))
+        props = getattr(context.scene, "snapsplit", None)
+        if obj is None or obj.type != 'MESH' or props is None:
             self.finish(context, cancelled=True); return {'CANCELLED'}
         if event.type in {'ESC'}:
             self.finish(context, cancelled=True); return {'CANCELLED'}
 
         updated = False
         try:
-            typed_mm = float(getattr(self.props, "split_offset_mm", 0.0))
+            typed_mm = float(getattr(props, "split_offset_mm", 0.0))
             typed_scene = typed_mm * unit_mm()
             clamped_scene = max(self.lo - self.mid_world, min(self.hi - self.mid_world, typed_scene))
             half = 0.5 * (self.hi - self.lo) if (self.hi - self.lo) > 1e-12 else 1.0
@@ -1339,47 +1345,55 @@ class SNAP_OT_adjust_split_axis(Operator):
             dy = event.mouse_prev_y - event.mouse_y
             if dy != 0:
                 self.t_norm = max(-1.0, min(1.0, self.t_norm - dy * 0.001))
-                self.current_world_pos, _ = world_pos_from_norm(self.obj, self.axis, self.t_norm)
+                self.current_world_pos, _ = world_pos_from_norm(obj, self.axis, self.t_norm)
                 scene_units_offset = self.current_world_pos - self.mid_world
-                self.props.split_offset_mm = float(scene_units_offset) * (1.0 / unit_mm())
+                props.split_offset_mm = float(scene_units_offset) * (1.0 / unit_mm())
                 updated = True
 
         step = 0.01
         if event.type in {'WHEELUPMOUSE', 'UP_ARROW'} and event.value == 'PRESS':
             self.t_norm = min(1.0, self.t_norm + step)
-            self.current_world_pos, _ = world_pos_from_norm(self.obj, self.axis, self.t_norm)
+            self.current_world_pos, _ = world_pos_from_norm(obj, self.axis, self.t_norm)
             scene_units_offset = self.current_world_pos - self.mid_world
-            self.props.split_offset_mm = float(scene_units_offset) * (1.0 / unit_mm())
+            props.split_offset_mm = float(scene_units_offset) * (1.0 / unit_mm())
             updated = True
 
         if event.type in {'WHEELDOWNMOUSE', 'DOWN_ARROW'} and event.value == 'PRESS':
             self.t_norm = max(-1.0, self.t_norm - step)
-            self.current_world_pos, _ = world_pos_from_norm(self.obj, self.axis, self.t_norm)
+            self.current_world_pos, _ = world_pos_from_norm(obj, self.axis, self.t_norm)
             scene_units_offset = self.current_world_pos - self.mid_world
-            self.props.split_offset_mm = float(scene_units_offset) * (1.0 / unit_mm())
+            props.split_offset_mm = float(scene_units_offset) * (1.0 / unit_mm())
             updated = True
 
         if updated:
-            if getattr(self, "preview_plane", None):
-                try: self.preview_plane.matrix_world = build_preview_matrix(self.obj, self.axis, self.current_world_pos)
-                except ReferenceError: pass
+            # Undo may have removed the preview plane; recreate it by name if needed.
+            try:
+                plane = create_or_get_preview_plane(context, obj, self.axis, self._plane_name)
+                plane.matrix_world = build_preview_matrix(obj, self.axis, self.current_world_pos)
+            except Exception:
+                pass
 
-            parts_cnt = max(2, int(getattr(self.props, "parts_count", 2)))
-            offset_scene = float(getattr(self.props, "split_offset_mm", 0.0)) * unit_mm()
-            try: position_preview_planes_for_object(context, self.obj, self.axis, parts_cnt, offset_scene)
+            parts_cnt = max(2, int(getattr(props, "parts_count", 2)))
+            offset_scene = float(getattr(props, "split_offset_mm", 0.0)) * unit_mm()
+            try: position_preview_planes_for_object(context, obj, self.axis, parts_cnt, offset_scene)
             except Exception: pass
 
             try:
-                if getattr(context.scene.snapsplit, "show_split_preview", False):
+                if getattr(props, "show_split_preview", False):
                     update_split_preview_plane(context)
             except Exception: pass
 
-            if self._area: self._area.tag_redraw()
-            if self._region:
-                try: self._region.tag_redraw()
-                except Exception: pass
+            _tag_redraw(context)
 
         return {'RUNNING_MODAL'}
+
+
+def _tag_redraw(context):
+    """Redraw the area/region of the current context (modal events run in the invoking area)."""
+    for item in (getattr(context, "area", None), getattr(context, "region", None)):
+        if item is not None:
+            try: item.tag_redraw()
+            except Exception: pass
 
 # ---------------------------
 # Planar Split – prepare hollow, then split (+ optional auto-cap)
