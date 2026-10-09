@@ -83,9 +83,13 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
 - `event_timer_add`로 만든 타이머는 같은 스크립트(또는 `try/finally`)에서 `event_timer_remove`한다. 덮어쓰기(`driver_namespace["qa_timer"] = ...`
   재실행)로 이전 타이머를 잃어버리지 않는다.
 - 모달을 스크립트로 띄운 채 undo를 실행하는 시나리오는 의도한 테스트일 때만 쓴다(실제 GUI에서는 모달이 Ctrl+Z를 가로챈다).
-  회귀 테스트는 `tests/cases/test_modal_undo_safety.py`.
+  회귀 테스트는 `tests/cases/test_modal_undo_safety.py`(headless)와 `python3 tests/run_tests.py --gui`
+  (`tests/gui/gui_runner.py`: 모달 중 undo/redo·휠 입력, 커넥터 프리뷰 재생성, 모달 중 파일 로드 시 `cancel()` 정리를
+  이벤트 시뮬레이션 GUI 인스턴스에서 확인. 실행 중 창을 건드리지 말 것).
 - 사용자가 쓰는 Blender(MCP 서버 호스트)로 크래시 재현을 하지 않는다. 별도 인스턴스를 `--factory-startup`으로 띄우고,
-  `TEMP`/`TMP`를 별도 폴더로 지정해 `%TEMP%\blender.crash.txt`·`quit.blend`를 덮어쓰지 않게 한다.
+  `TEMP`/`TMP`를 별도 폴더로 지정해 `%TEMP%\blender.crash.txt`·`quit.blend`를 덮어쓰지 않게 한다
+  (WSL에서는 `WSLENV=TEMP:TMP`로 전달). `tests/run_tests.py`는 모든 Blender 하위 프로세스를 `tests/_out/tmp`로 돌리며,
+  `bpy.app.tempdir`가 그 안에 있지 않으면 FAIL 처리한다.
 
 ---
 

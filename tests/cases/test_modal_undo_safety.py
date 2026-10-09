@@ -13,6 +13,11 @@ window manager accepts modal_handler_add(). Between invoke and modal a real
 ``ed.undo`` re-allocates ``scene.snapsplit``. Before the fix the modal wrote the
 new offset into freed memory (the live property stayed 0.0, or Blender crashed);
 now every event resolves the scene settings and objects again.
+
+Also covered: the click-connector preview objects (freed by the undo) are kept by
+name and rebuilt on the next mouse move, and cancel() - called by Blender on file
+load / window close - removes all preview objects. The real GUI path (simulated
+input, real file load) is ``python3 tests/run_tests.py --gui``.
 """
 
 import bpy
@@ -91,6 +96,11 @@ def _undo_reallocating_props():
     return before, after
 
 
+def _preview_names():
+    """Connector preview objects currently in the file."""
+    return sorted(o.name for o in bpy.data.objects if o.name.startswith("SnapSplit_Preview"))
+
+
 def _push(message):
     bpy.ops.ed.undo_push(message=message)
 
@@ -132,6 +142,14 @@ def _check_adjust_split_axis(ops_split):
     assert bpy.context.scene.snapsplit.split_offset_mm != before
     assert not _cached_struct_refs(op), _cached_struct_refs(op)
 
+    # cancel() (file load / window close) cleans up like Esc
+    op2, _reports2 = _stand_in(ops_split.SNAP_OT_adjust_split_axis)
+    assert ops_split.SNAP_OT_adjust_split_axis.invoke(op2, ctx, _Event('NONE')) == {'RUNNING_MODAL'}
+    assert any(o.name.startswith(ops_split.PREVIEW_PLANE_PREFIX) for o in bpy.data.objects)
+    ops_split.SNAP_OT_adjust_split_axis.cancel(op2, ctx)
+    leftovers = [o.name for o in bpy.data.objects if o.name.startswith(ops_split.PREVIEW_PLANE_PREFIX)]
+    assert not leftovers, leftovers
+
     # Object vanished (e.g. undone): the modal ends cleanly instead of raising
     bpy.data.objects.remove(bpy.data.objects["UndoSafety_Cube"])
     ret = ops_split.SNAP_OT_adjust_split_axis.modal(op, ctx, _Event('TIMER', 'NOTHING'))
@@ -172,13 +190,28 @@ def _check_place_connectors_click(ops_connectors):
                      msg="frame built from stale settings")
     assert sorted([op.a.name, op.b.name]) == names
 
+    # The undo freed the preview objects created by invoke(); only names were kept,
+    # so nothing dangles and the next mouse move rebuilds the preview
+    assert not op.preview_objs and op.preview_obj is None, _preview_names()
     ret = cls.modal(op, ctx, _Event('MOUSEMOVE', 'NOTHING'))
     assert ret == {'RUNNING_MODAL'}, ret
+    assert op.preview_obj is not None and op.preview_objs, "preview not rebuilt after undo"
+    assert sorted(o.name for o in op.preview_objs) == _preview_names()
 
-    # A part vanished: the modal ends cleanly
+    # cancel() (Blender calls it on file load / window close) removes the preview
+    cls.cancel(op, ctx)
+    assert not _preview_names(), _preview_names()
+    assert op.preview_objs == [] and op.preview_obj is None
+
+    # A part vanished: the modal ends cleanly and leaves no preview behind
+    op, _reports = _stand_in(cls)
+    lib.select_only([bpy.data.objects[n] for n in names])
+    assert cls.invoke(op, ctx, _Event('NONE')) == {'RUNNING_MODAL'}
+    assert _preview_names()
     bpy.data.objects.remove(bpy.data.objects[names[0]])
     ret = cls.modal(op, ctx, _Event('MOUSEMOVE', 'NOTHING'))
     assert ret == {'CANCELLED'}, ret
+    assert not _preview_names(), _preview_names()
 
 
 def run(ctx):
