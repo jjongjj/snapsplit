@@ -82,8 +82,9 @@ def run(ctx):
     for (x, z), p in zip(targets, op._world):
         assert abs(p[0] - x) < 0.06 and abs(p[2] - z) < 0.06 and abs(p[1]) < 1e-6, (p, x, z)
     assert pl.modal(op, mctx, event('MOUSEMOVE', 'NOTHING', screen(20.0, 10.0))) == {'PASS_THROUGH'}
-    band = module._PREVIEW["lines"][-1]
-    assert band[1] and abs(band[2][-1][0] - 20.0) < 0.06, band
+    band = module._PREVIEW["lines"][1]
+    assert abs(band[2][1][0] - 20.0) < 0.06, band
+    assert len(module._PREVIEW["lines"]) >= 5, "the cutter outline stays while the rubber band moves"
     assert pl.modal(op, mctx, event('BACK_SPACE')) == {'RUNNING_MODAL'} and len(op._world) == 3
     assert pl.modal(op, mctx, event('Z', ctrl=True)) == {'RUNNING_MODAL'} and len(op._world) == 2
     for x, z in targets[2:]:

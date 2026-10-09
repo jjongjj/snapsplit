@@ -143,10 +143,12 @@ class _Base:
 
 
 def _check_row(col, ok, text, fix=None, icon_bad='ERROR', translate=True):
-    row = col.row(align=True)
-    row.label(text=text, icon='CHECKMARK' if ok else icon_bad, translate=translate)
-    if not ok and fix:
-        row.operator(OP(fix), text="Fix")
+    if ok or not fix:
+        col.label(text=text, icon='CHECKMARK' if ok else icon_bad, translate=translate)
+        return
+    row = col.split(factor=0.78, align=True)    # the check text keeps most of the narrow sidebar
+    row.label(text=text, icon=icon_bad, translate=translate)
+    row.operator(OP(fix), text="Fix")
 
 
 def draw_checks(context, layout, obj):

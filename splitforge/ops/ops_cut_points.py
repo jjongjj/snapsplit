@@ -245,6 +245,7 @@ class _PointsCut:
         self._cursor = None       # rubber band end (world tuple) or None
         self._message = ""
         self._valid = False
+        self._cutter_lines = []   # cutter outline of the last valid points (plain tuples)
         _RUNNING.append(True)
         _PREVIEW["region"] = context.region.as_pointer()
         _PREVIEW["lines"] = []
@@ -330,19 +331,28 @@ class _PointsCut:
                 band = [pts[-1], self._cursor] + ([pts[0]] if self.KIND == 'POLYGON' and len(pts) >= 2 else [])
                 lines.append((BAND_COLOR, 1.5, band))
         if cutter is not None:
-            f = cutter.frame
-            if self.KIND == 'POLYGON':
-                for z in ((cutter.z_floor,) if not cutter.through else (cutter.z0, cutter.z_floor)):
-                    lines.append((CUTTER_COLOR, 1.5, [tuple(f.to3d(x, y, z)) for x, y in cutter.poly + cutter.poly[:1]]))
-                for x, y in cutter.poly:
-                    lines.append((CUTTER_COLOR, 1.0, [tuple(f.to3d(x, y, cutter.z0)), tuple(f.to3d(x, y, cutter.z_floor))]))
-            else:
-                for z in (cutter.z0, cutter.z1, 0.5 * (cutter.z0 + cutter.z1)):
-                    lines.append((CUTTER_COLOR, 1.5, [tuple(f.to3d(x, y, z)) for x, y in cutter.extended]))
+            # plain tuples, kept for the following rubber band redraws
+            self._cutter_lines = self._cutter_preview(cutter)
+        elif not self._valid:
+            self._cutter_lines = []
+        lines += self._cutter_lines
         _PREVIEW["lines"] = lines
         _PREVIEW["points"] = pts
         if context.area is not None:
             context.area.tag_redraw()
+
+    def _cutter_preview(self, cutter):
+        f = cutter.frame
+        out = []
+        if self.KIND == 'POLYGON':
+            for z in ((cutter.z_floor,) if not cutter.through else (cutter.z0, cutter.z_floor)):
+                out.append((CUTTER_COLOR, 1.5, [tuple(f.to3d(x, y, z)) for x, y in cutter.poly + cutter.poly[:1]]))
+            for x, y in cutter.poly:
+                out.append((CUTTER_COLOR, 1.0, [tuple(f.to3d(x, y, cutter.z0)), tuple(f.to3d(x, y, cutter.z_floor))]))
+        else:
+            for z in (cutter.z0, cutter.z1, 0.5 * (cutter.z0 + cutter.z1)):
+                out.append((CUTTER_COLOR, 1.5, [tuple(f.to3d(x, y, z)) for x, y in cutter.extended]))
+        return out
 
     def _confirm(self, context):
         """Enter (or closing a polygon): commit valid points. Returns the modal result or None."""

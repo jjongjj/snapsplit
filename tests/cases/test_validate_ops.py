@@ -80,6 +80,7 @@ def run(ctx):
     bpy.ops.ed.undo_push(message="before fix")
     run_fix(bpy.ops.splitforge.fix_transforms)
     cube = bpy.data.objects["VScaled"]
+    assert validate.last_report(cube) is not None, "the panel keeps showing the (re-run) mesh check"
     assert validate.transform_is_applied(cube)
     assert tuple(round(x, 6) for x in cube.scale) == (1.0, 1.0, 1.0)
     xs = [v.co.x for v in cube.data.vertices]
@@ -231,7 +232,7 @@ def run(ctx):
             pass
 
         def __getattr__(self, name):
-            if name in ("row", "column", "box"):
+            if name in ("row", "column", "box", "split"):
                 return lambda *a, **k: L()
             if name == "label":
                 return lambda text="", **k: log.append(("label", text))

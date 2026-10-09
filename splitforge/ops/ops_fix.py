@@ -106,7 +106,10 @@ class SPLITFORGE_OT_fix_transforms(_FixOp, Operator):
             return {'CANCELLED'}
         scale = tuple(round(x, 4) for x in obj.scale)
         n_cuts = len(stack_api.get_stack(obj).cuts)
+        had_report = validate.last_report(obj) is not None
         apply_rotation_scale(obj)
+        if had_report:
+            self._recheck(context, obj)
         self.report({'INFO'}, f"{obj.name}: applied rotation and scale {scale} to the mesh; "
                               f"{n_cuts} cut(s) kept in place{self._rebuild_hint(obj)}")
         return {'FINISHED'}

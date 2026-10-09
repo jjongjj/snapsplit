@@ -28,6 +28,11 @@ Scenarios
                        one connector per step (during and after the modal), Build, file load
     p3_connector_types QA-10: one connector of every type on a bar, built and pulled apart
                        (screenshots of the pins and sockets)
+    p4_points          QA-11: polyline clicked (Ctrl+Z removes a point in the modal), Enter, real
+                       Ctrl+Z / Ctrl+Shift+Z, Esc/RMB; polygon from above closed by clicking its first
+                       corner, a connector clicked onto the cut-out floor, modal Build, file load
+    p4_fix             QA-12: print checks in the sidebar: Check Mesh, Fix buttons (normals,
+                       transforms with real Ctrl+Z / Ctrl+Shift+Z, units dialog) clicked for real
 """
 
 import argparse
@@ -943,6 +948,174 @@ def p3_setup_types():
     set_shading_solid(overlays=True)
 
 
+# --- P4: polyline / polygon cuts, print checks ---------------------------------------
+
+POINTS_OPS = ("SPLITFORGE_OT_stack_add_polyline", "SPLITFORGE_OT_stack_add_polygon")
+POLYLINE = [(-28.0, -8.0), (-8.0, -2.0), (8.0, -9.0), (28.0, -3.0)]
+SQUARE = [(-9.0, -9.0), (9.0, -9.0), (9.0, 9.0), (-9.0, 9.0)]
+
+
+def points_state():
+    return mod("ops.ops_cut_points")
+
+
+def p4_setup():
+    """40 mm cube, overlays on, nothing in the stack."""
+    setup_cube(overlays=True)
+    with override():
+        cube = bpy.data.objects["GUI_Cube"]
+        bpy.context.view_layer.objects.active = cube
+        cube.select_set(True)
+        sf().show_overlay = True
+        bpy.ops.ed.undo_push(message="gui: p4 setup")
+    STATE["objects_before"] = sorted(o.name for o in bpy.data.objects)
+
+
+def top_xy(x, y, z=0.0):
+    return lambda: world_to_window((x, y, z))
+
+
+def p4_click_points(points, xy_of):
+    steps = []
+    for p in points:
+        steps += [move(xy_of(*p)), wait] + click('LEFTMOUSE', xy_of(*p)) + [wait]
+    return steps
+
+
+def p4_check_preview_points(n, what):
+    def step():
+        st = points_state()
+        pts = st._PREVIEW["points"]
+        check(f"{what}: {n} point(s) in the preview", len(pts) == n, len(pts))
+        check("points modal running", any(o in modal_ops() for o in POINTS_OPS), modal_ops())
+        check("no objects created while placing points",
+              sorted(o.name for o in bpy.data.objects) == STATE["objects_before"],
+              sorted(o.name for o in bpy.data.objects))
+    return named(f"p4_preview_{n}", step)
+
+
+def p4_check_ended(what):
+    def step():
+        st = points_state()
+        check(f"{what}: points modal ended, handler removed",
+              not any(o in modal_ops() for o in POINTS_OPS) and st._HANDLE is None and not st._RUNNING,
+              (modal_ops(), st._HANDLE, st._RUNNING))
+    return named("p4_ended", step)
+
+
+def p4_check_cut(index, kind, n_points, points=None, axes=(0, 2)):
+    def step():
+        cuts = sf_cuts()
+        ok = len(cuts) > index and cuts[index].kind == kind and len(cuts[index].points) == n_points
+        check(f"cut {index}: {kind} with {n_points} points", ok,
+              [(c.kind, len(c.points)) for c in cuts])
+        if ok and points:
+            got = [(p.co[axes[0]], p.co[axes[1]]) for p in cuts[index].points]
+            check(f"{kind} points where clicked (+-0.5 mm), kept as clicked",
+                  all(abs(a - x) < 0.5 and abs(b - y) < 0.5 for (a, b), (x, y) in zip(got, points)),
+                  [(round(a, 2), round(b, 2)) for a, b in got])
+    return named(f"p4_cut_{index}", step)
+
+
+def p4_count(n, what):
+    return named(f"p4_count_{n}", lambda: check(f"{what}: {n} cut(s)", len(sf_cuts()) == n, len(sf_cuts())))
+
+
+def p4_check_parts(names):
+    def step():
+        parts = sf_parts()
+        check(f"Build: parts {names}", parts == names, parts)
+        for n in parts:
+            check(f"{n} manifold", is_manifold(bpy.data.objects[n]))
+        if "GUI_Cube_AA" in parts:
+            plug = bpy.data.objects["GUI_Cube_AA"]
+            zs = [(plug.matrix_world @ v.co).z for v in plug.data.vertices]
+            check("polygon plug spans the depth (z 10..20) plus its pins", max(zs) > 19.99 and min(zs) < 10.0,
+                  (round(min(zs), 3), round(max(zs), 3)))
+    return named("p4_parts", step)
+
+
+def p4_show_source():
+    with override():
+        cube = bpy.data.objects["GUI_Cube"]
+        cube.hide_set(False)
+        bpy.context.view_layer.objects.active = cube
+        cube.select_set(True)
+    STATE["objects_before"] = sorted(o.name for o in bpy.data.objects)
+
+
+def p4_lift_plug():
+    for n in sf_parts():
+        if n.endswith("_AA"):
+            bpy.data.objects[n].location.z += 14.0
+        elif n.endswith("_BB"):
+            bpy.data.objects[n].location.z -= 8.0
+
+
+def p4_check_floor_connector():
+    cut = sf_cuts()[1]
+    conns = cut.connectors
+    ok = len(conns) == 1 and abs(math.hypot(conns[0].u, conns[0].v) - math.hypot(2.0, 3.0)) < 0.5
+    check("click on the polygon floor placed a connector there", ok,
+          [(round(c.u, 2), round(c.v, 2)) for c in conns])
+
+
+FIX_BTN = {
+    "check": "bpy.ops.splitforge.validate()",
+    "transforms": "bpy.ops.splitforge.fix_transforms()",
+    "normals": "bpy.ops.splitforge.fix_normals()",
+    "units": "bpy.ops.splitforge.fix_units()",
+}
+
+
+def p4_fix_setup():
+    """Cube scaled 1.5 / rotated 20 degrees with two faces flipped, a Z cut, in a meter scene."""
+    sf_setup(1)()
+    with override():
+        cube = bpy.data.objects["GUI_Cube"]
+        sf_cuts()[0].origin = (5.0, 3.0, 4.0)      # off the object origin: moves if the stack were not kept
+        cube.scale = (1.5, 1.5, 1.5)
+        cube.rotation_euler = (0.0, 0.0, math.radians(20.0))
+        bm = bmesh.new()
+        bm.from_mesh(cube.data)
+        bm.faces.ensure_lookup_table()
+        bmesh.ops.reverse_faces(bm, faces=bm.faces[:2])
+        bm.to_mesh(cube.data)
+        bm.free()
+        units = bpy.context.scene.unit_settings
+        units.length_unit, units.scale_length = 'METERS', 1.0
+        bpy.context.view_layer.update()
+        bpy.ops.ed.undo_push(message="gui: p4 fix setup")
+    cube = bpy.data.objects["GUI_Cube"]
+    STATE["fix_world"] = (cube.matrix_world @ Vector(sf_cuts()[0].origin)).copy()
+    STATE["fix_normal"] = ((cube.matrix_world.to_3x3().inverted().transposed() @ Vector(sf_cuts()[0].normal))
+                           .normalized().copy())
+
+
+def p4_fix_state():
+    cube = bpy.data.objects["GUI_Cube"]
+    rep = mod("core.validate").last_report(cube)
+    return cube, rep
+
+
+def p4_check_fixed_transforms():
+    cube, _rep = p4_fix_state()
+    world = cube.matrix_world @ Vector(sf_cuts()[0].origin)
+    check("Fix (transforms) button: scale 1, rotation 0", tuple(round(x, 5) for x in cube.scale) == (1.0, 1.0, 1.0)
+          and abs(cube.rotation_euler.z) < 1e-6, (tuple(cube.scale), cube.rotation_euler.z))
+    normal = (cube.matrix_world.to_3x3().inverted().transposed() @ Vector(sf_cuts()[0].normal)).normalized()
+    check("the cut stayed in place in the world (point and normal)",
+          (world - STATE["fix_world"]).length < 1e-4 and (normal - STATE["fix_normal"]).length < 1e-5,
+          (tuple(world), tuple(STATE["fix_world"]), tuple(normal), tuple(STATE["fix_normal"])))
+
+
+def p4_check_scale(value, what):
+    return named(f"p4_scale_{value}", lambda: check(f"{what}: scale {value}",
+                                                   abs(bpy.data.objects["GUI_Cube"].scale.x - value) < 1e-5,
+                                                   tuple(bpy.data.objects["GUI_Cube"].scale)))
+
+
+
 SCENARIOS = {
     "p1_adjust_plane": (
         [sf_setup(1), set_oblique_view(1.6), sf_overlay(False), wait, screenshot("overlay_off"),
@@ -1114,6 +1287,69 @@ SCENARIOS = {
                                       setattr(bpy.context.view_layer.objects, "active", bpy.data.objects["GUI_Cube"]))),
            set_view('TOP', 1.5), invoke("splitforge.connector_add_click"), move(pos(10)), wait, load_homefile, wait,
            p3_check_ended, sf_no_overlay_errors]
+    ),
+    "p4_points": (
+        [p4_setup, set_view('FRONT', 1.3), wait, screenshot("before"),
+         invoke("splitforge.stack_add_polyline"), wait]
+        # Four clicks; Ctrl+Z removes the last point (inside the modal), click it again
+        + p4_click_points(POLYLINE, front_xy)
+        + [p4_check_preview_points(4, "4 clicks"), ctrl_key('Z'), wait, p4_check_preview_points(3, "Ctrl+Z")]
+        + p4_click_points(POLYLINE[3:], front_xy)
+        + [p4_check_preview_points(4, "clicked again"), move(front_xy(10.0, 15.0)), wait, screenshot("polyline_preview"),
+           set_oblique_view(1.5), wait, screenshot("polyline_oblique"), set_view('FRONT', 1.3), wait,
+           key('RET'), wait, p4_check_ended("Enter"), p4_check_cut(0, 'POLYLINE', 4, POLYLINE)]
+        # Real Ctrl+Z / Ctrl+Shift+Z after the modal: one undo step per cut
+        + [ctrl_key('Z'), wait, p4_count(0, "Ctrl+Z"), ctrl_key('Z', shift=True), wait, p4_count(1, "Ctrl+Shift+Z")]
+        # Esc / RMB leave nothing
+        + [invoke("splitforge.stack_add_polyline"), wait] + p4_click_points(POLYLINE[:2], front_xy)
+        + [key('ESC'), wait, p4_check_ended("Esc"), p4_count(1, "Esc")]
+        + [invoke("splitforge.stack_add_polygon"), wait] + p4_click_points(SQUARE[:2], front_xy)
+        + click('RIGHTMOUSE', front_xy(0.0, 25.0)) + [wait, p4_check_ended("RMB"), p4_count(1, "RMB")]
+        # Polygon from above, 10 mm deep: four corners, a click on the first corner closes it
+        + [set_view('TOP', 1.3), wait, invoke_with("splitforge.stack_add_polygon", depth_mm=10.0), wait]
+        + p4_click_points(SQUARE, top_xy)
+        + [p4_check_preview_points(4, "polygon corners"), screenshot("polygon_preview")]
+        + click('LEFTMOUSE', top_xy(*SQUARE[0])) + [wait, p4_check_ended("closing click"),
+                                                     p4_check_cut(1, 'POLYGON', 4, SQUARE, axes=(0, 1))]
+        # A connector clicked onto the floor of the cut-out (connector_add_click on the polygon cut)
+        + [invoke("splitforge.connector_add_click"), move(top_xy(2.0, 3.0, 10.0)), wait]
+        + click('LEFTMOUSE', top_xy(2.0, 3.0, 10.0)) + [wait, key('ESC'), wait, p4_check_floor_connector]
+        # Modal Build: plug, upper body with the pocket, lower part
+        + [invoke("splitforge.build"), wait, p2_wait_build(), wait,
+           p4_check_parts(["GUI_Cube_AA", "GUI_Cube_AB", "GUI_Cube_BB"]),
+           set_oblique_view(1.6), p4_lift_plug, sf_overlay(False), wait, screenshot("built_apart"), sf_overlay(True)]
+        # File load while placing points -> cancel()
+        + [p4_show_source, set_view('FRONT', 1.3), invoke("splitforge.stack_add_polyline"), wait]
+        + p4_click_points(POLYLINE[:2], front_xy)
+        + [load_homefile, wait, p4_check_ended("file load"), sf_no_overlay_errors]
+    ),
+    "p4_fix": (
+        [p4_fix_setup, set_oblique_view(1.8), sf_open_sidebar, wait] + [sf_tab_click, wait] * 40
+        + [sf_check_tab] + sf_scan()
+        + [sf_check_buttons([FIX_BTN["check"], FIX_BTN["transforms"], FIX_BTN["units"]]), screenshot("checks_before")]
+        # Check Mesh, then the panel shows the normals row with its Fix button
+        + press_button(FIX_BTN["check"])
+        + [named("checked", lambda: check("Check Mesh found the flipped faces",
+                                          p4_fix_state()[1] is not None and not p4_fix_state()[1].normals_ok,
+                                          p4_fix_state()[1]))]
+        + sf_scan() + [sf_check_buttons([FIX_BTN["normals"]]), screenshot("checks_found")]
+        + press_button(FIX_BTN["normals"])
+        + [named("normals_fixed", lambda: check("Fix (normals) button: normals outward",
+                                                p4_fix_state()[1] is not None and p4_fix_state()[1].normals_ok,
+                                                p4_fix_state()[1]))]
+        # Fix (transforms): the cut stays put; real Ctrl+Z / Ctrl+Shift+Z
+        + press_button(FIX_BTN["transforms"])
+        + [p4_check_fixed_transforms, ctrl_key('Z'), wait, p4_check_scale(1.5, "Ctrl+Z"),
+           ctrl_key('Z', shift=True), wait, p4_check_scale(1.0, "Ctrl+Shift+Z")]
+        # Fix (units): the dialog asks Keep Units / Keep Size; Enter accepts Keep Units
+        + press_button(FIX_BTN["units"]) + [wait, key('RET', xy_fn=button_xy(FIX_BTN["units"])), wait,
+                                            named("units_fixed", lambda: check(
+                                                "Fix (units) button: Millimeters, Unit Scale 0.001",
+                                                bpy.context.scene.unit_settings.length_unit == 'MILLIMETERS'
+                                                and abs(bpy.context.scene.unit_settings.scale_length - 0.001) < 1e-9,
+                                                (bpy.context.scene.unit_settings.length_unit,
+                                                 bpy.context.scene.unit_settings.scale_length)))]
+        + [wait, screenshot("checks_fixed"), sf_no_overlay_errors]
     ),
     "p3_connector_types": (
         [p3_setup_types, set_oblique_view(1.1), wait, screenshot("records"),
