@@ -237,7 +237,8 @@ def cut_spec(obj, cut, scene):
     if cut.kind == 'POLYGON':
         points, d = stroke_world(obj.matrix_world, cut)
         try:
-            cutter = polygon.build_cutter(points, d, world_corners(obj), gap, cut.depth_mm * mm)
+            cutter = polygon.build_cutter(points, d, world_corners(obj), gap, cut.depth_mm * mm,
+                                           mm)
         except stroke.StrokeError as ex:
             raise BuildError(f"{cut.name}: {ex}") from None
         return PolygonCut(cut.name, cut.uid, cutter, gap)

@@ -40,6 +40,12 @@ from mathutils import Vector
 from . import stroke
 
 MARGIN_FRACTION = stroke.MARGIN_FRACTION
+# Smallest cut-out (defect D21): about MIN_SIZE_MM across -- 2 x area / perimeter at least half of it
+# (a square of side MIN_SIZE_MM, a strip MIN_SIZE_MM / 2 wide) -- and its volume inside the object's
+# bounding box at least MIN_VOLUME_SHARE of that box: smaller pieces are below what the boolean result
+# checks can tell from float noise (and below anything printable).
+MIN_SIZE_MM = 0.5
+MIN_VOLUME_SHARE = 1e-5
 
 
 def signed_area(poly):
@@ -200,12 +206,13 @@ def clean_points(pts, eps):
     return out
 
 
-def build_cutter(points, direction, corners, gap=0.0, depth=0.0):
+def build_cutter(points, direction, corners, gap=0.0, depth=0.0, mm=0.0):
     """PolygonCutter for a closed polygon (world points, extrusion ``direction``) around an object.
 
     ``corners``: world points bounding the object, ``gap``: kerf width,
     ``depth``: how far the cut-out reaches from the front of the object along
-    ``direction`` (0 = through everything); all in the same unit. Raises
+    ``direction`` (0 = through everything); all in the same unit. ``mm``: one
+    millimeter in that unit, for the minimum size checks (0 skips them). Raises
     stroke.StrokeError with a user message for an unusable polygon.
     """
     d = Vector(direction)
@@ -249,6 +256,16 @@ def build_cutter(points, direction, corners, gap=0.0, depth=0.0):
     z0 = front - margin
     through = depth <= 0.0 or front + depth >= back
     z_floor = back + margin if through else front + depth
+    if mm > 0.0:
+        min_width = 0.5 * MIN_SIZE_MM * mm
+        n = len(poly)
+        perimeter = sum(math.dist(poly[i], poly[(i + 1) % n]) for i in range(n))
+        width = 2.0 * abs(area) / perimeter
+        box = [max(c[i] for c in corners) - min(c[i] for c in corners) for i in range(3)]
+        thickness = (back - front) if through else min(depth, back - front)
+        if width < min_width * (1.0 - 1e-6) or abs(area) * thickness < MIN_VOLUME_SHARE * box[0] * box[1] * box[2]:
+            raise stroke.StrokeError(f"The polygon is too small or too narrow to cut out: draw a region at least "
+                                     f"{MIN_SIZE_MM:g} mm across")
     return PolygonCutter(frame, poly, inner, outer, z0, z_floor, max(gap, 0.0), through)
 
 

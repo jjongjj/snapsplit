@@ -118,7 +118,8 @@ def stroke_problem(obj, cut, scene):
     try:
         if cut.kind == 'POLYGON':
             polygon.build_cutter(points, d, corners, units.mm_to_scene(cut.gap_mm, scene),
-                                 units.mm_to_scene(cut.depth_mm, scene))
+                                 units.mm_to_scene(cut.depth_mm, scene),
+                                 units.mm_to_scene(1.0, scene))
         else:
             stroke.build_cutter(points, d, corners, units.mm_to_scene(cut.gap_mm, scene), cut.kind)
     except stroke.StrokeError as ex:

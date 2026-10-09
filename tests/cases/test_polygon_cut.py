@@ -163,6 +163,26 @@ def run(ctx):
     assert "too narrow" in stack_api.stroke_problem_cached(bad, narrow, bpy.context.scene)
     narrow.gap_mm = 0.0
 
+    # --- D21: too small to cut out (refused at add time and by the panel check); 0.5 mm builds ---------
+    tiny = new_cube("PGTiny")
+    for side in (0.01, 0.1, 0.4):
+        sq = [(0.0, 0.0, 30.0), (side, 0.0, 30.0), (side, side, 30.0), (0.0, side, 30.0)]
+        expect_error(lambda: add(sq, depth_mm=5.0), "too small or too narrow")
+    expect_error(lambda: add([(-10, 0, 30), (10, 0, 30), (10, 0.2, 30), (-10, 0.2, 30)], depth_mm=5.0),
+                 "too small or too narrow")
+    assert len(tiny.splitforge_stack.cuts) == 0
+    half_mm = [(0.0, 0.0, 30.0), (0.5, 0.0, 30.0), (0.5, 0.5, 30.0), (0.0, 0.5, 30.0)]
+    assert add(half_mm, depth_mm=5.0) == {'FINISHED'}
+    res = build.build(bpy.context, tiny)
+    assert len(res.parts) == 2 and [b[1] for b in res.booleans] == ['EXACT', 'EXACT'], (res.parts, res.booleans)
+    stored = tiny.splitforge_stack.cuts[0]
+    for p, co in zip(stored.points, [(0, 0, 30), (0.05, 0, 30), (0.05, 0.05, 30), (0, 0.05, 30)]):
+        p.co = co
+    assert "too small" in stack_api.stroke_problem_cached(tiny, stored, bpy.context.scene)
+    lib.select_only([tiny])
+    tiny.hide_set(False)
+    expect_error(lambda: bpy.ops.splitforge.build(), "too small")
+
     # --- Easy cut-out ---------------------------------------------------------------------------
     easy = new_cube("PGE")
     s = bpy.context.scene.splitforge

@@ -135,7 +135,8 @@ def prepare(context, obj, kind, points_world, direction, gap=0.0, depth=0.0):
     corners = build.world_corners(obj)
     source = _source_bvh(context, obj)
     if kind == 'POLYGON':
-        cutter = polygon.build_cutter(pts, d, corners, gap, depth)
+        cutter = polygon.build_cutter(pts, d, corners, gap, depth,
+                                       units.mm_to_scene(1.0, context.scene))
         surface = cutter.solid()
         what = "polygon"
     else:
