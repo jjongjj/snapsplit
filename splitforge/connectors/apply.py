@@ -37,15 +37,16 @@ class ConnectorSpec:
     clearance: float
     gap: float
     pin_positive: bool
+    cut_uid: str = ""     # cut the connector belongs to (its plane is not an "other" plane)
 
 
 def _containing_piece(bvhs, point):
     """Index of the closed piece containing ``point`` (None if outside all)."""
     best, best_dist = None, None
     for i, bvh in enumerate(bvhs):
-        co, normal, _index, dist = bvh.find_nearest(point)
-        if co is None or (point - co).dot(normal) >= 0.0:
+        if not fit.is_inside(bvh, point):
             continue
+        dist = bvh.find_nearest(point)[3]
         if best_dist is None or dist < best_dist:
             best, best_dist = i, dist
     return best
@@ -79,12 +80,14 @@ def _capsules_touch(a, b):
     return _segment_distance(a[0], a[1], b[0], b[1]) < a[2] + b[2]
 
 
-def assign(pieces, specs, source_bvh=None):
+def assign(pieces, specs, source_bvh=None, planes=None, max_step=None):
     """Build the joined pin/socket operands per piece.
 
     ``pieces``: world-space bmeshes of the parts. With ``source_bvh`` (BVHTree of
-    the uncut source) a connector whose pin or socket would break through the
-    outer surface is skipped with a warning. Returns
+    the uncut source) and ``planes`` ({cut uid: (co, n, gap)} of the enabled
+    cuts) a connector whose pin or socket would break through the outer surface
+    or reach across another cut into a third part is skipped with a warning
+    (connectors/fit.py, samples at most ``max_step`` apart). Returns
     ``(pins, sockets, warnings, overlapping)``: ``pins``/``sockets`` are dicts
     piece index -> bmesh (caller frees them), ``overlapping`` the set of piece
     indices where two connector solids may intersect.
@@ -102,10 +105,18 @@ def assign(pieces, specs, source_bvh=None):
         if pin_piece is None or socket_piece is None or pin_piece == socket_piece:
             warnings.append(f"{spec.label}: not on a seam between two parts, skipped")
             continue
-        if source_bvh is not None and fit.worst_depth(source_bvh, spec) < -SURFACE_TOLERANCE * spec.length:
-            warnings.append(f"{spec.label}: pin or socket would break through the outer surface, skipped "
-                            "(move it inward, or Distribute again)")
-            continue
+        if source_bvh is not None:
+            others = [pl for uid, pl in (planes or {}).items() if uid != spec.cut_uid]
+            tol = -SURFACE_TOLERANCE * spec.length
+            res = fit.check(spec, source_bvh, others, tol, max_step=max_step)
+            if res.plane_margin < tol:
+                warnings.append(f"{spec.label}: pin or socket would reach across another cut into a part "
+                                "without a socket, skipped (move it, or Distribute again)")
+                continue
+            if not res.ok(tol):
+                warnings.append(f"{spec.label}: pin or socket would break through the outer surface, skipped "
+                                "(move it inward, or Distribute again)")
+                continue
         pin_span, socket_span = shapes.pin_and_socket_spans(
             spec.length, spec.clearance, spec.gap, spec.pin_positive)
         # Capsule around pin + socket: axis segment and in-plane reach

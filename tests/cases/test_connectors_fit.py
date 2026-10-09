@@ -9,6 +9,8 @@ checks pin and socket in 3D (both pin sides), moves misfits inward or drops them
 Build skips (with a warning) any connector that would break through.
 """
 
+import math
+
 import bpy
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
@@ -127,3 +129,63 @@ def run(ctx):
     for i, p in enumerate(pts):
         for q in pts[i + 1:]:
             assert ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5 >= spacing - 1e-9, pts
+
+    # Thin internal feature between the sample rings (0.3 mm cavity at z 3.45..3.75):
+    # Build must not pierce it (segment test), and the inside test is robust
+    import bmesh as _bm
+    holder = lib.make_cube(40.0)
+    holder.name = "Cavity"
+    slab = _bm.new()
+    _bm.ops.create_cube(slab, size=1.0)
+    for v in slab.verts:
+        v.co.x *= 30.0
+        v.co.y *= 30.0
+        v.co.z = 3.6 + v.co.z * 0.3
+    _bm.ops.reverse_faces(slab, faces=slab.faces)
+    slab.normal_update()
+    hb = _bm.new()
+    hb.from_mesh(holder.data)
+    me_tmp = bpy.data.meshes.new("slab_tmp")
+    slab.to_mesh(me_tmp)
+    hb.from_mesh(me_tmp)
+    hb.to_mesh(holder.data)
+    hb.free()
+    slab.free()
+    bpy.data.meshes.remove(me_tmp)
+    lib.select_only([holder])
+    lib.run_op(bpy.ops.splitforge.stack_add_plane, axis='Z')
+    hcut = holder.splitforge_stack.cuts[0]
+    hc = hcut.connectors.add()
+    hc.u, hc.v = 0.0, 0.0
+    result = build.build(bpy.context, holder)
+    assert any("break through" in w for w in result.warnings), result.warnings
+    cbvh = _source_bvh(bpy.data.objects["Cavity"])
+    assert fit.is_inside(cbvh, Vector((0.0, 0.0, 3.0))) and not fit.is_inside(cbvh, Vector((0.0, 0.0, 3.6)))
+    # Points on a face's extended plane beyond its edge are outside, near-face points inside
+    for p in ((25.0, 0.0, 20.0), (20.0, 25.0, 0.0), (21.0, 21.0, 20.0), (20.001, 0.0, 19.0)):
+        assert not fit.is_inside(bvh, Vector(p)), p
+    for p in ((19.999, 0.0, 0.0), (0.0, 0.0, -19.99), (19.9, 19.9, 19.9)):
+        assert fit.is_inside(bvh, Vector(p)), p
+
+    # Knife edge (20 deg wedge): just outside the sharp edge the nearest point is the
+    # edge itself, and the normal of the other face says "inside". Ray parity decides.
+    w = _bm.new()
+    half = math.radians(10.0)
+    pts2d = [(0.0, 0.0), (-30.0, 30.0 * math.tan(half)), (-30.0, -30.0 * math.tan(half))]
+    front = [w.verts.new((x, -10.0, z)) for x, z in pts2d]
+    back = [w.verts.new((x, 10.0, z)) for x, z in pts2d]
+    w.faces.new(front[::-1])
+    w.faces.new(back)
+    for i in range(3):
+        j = (i + 1) % 3
+        w.faces.new((front[i], front[j], back[j], back[i]))
+    _bm.ops.recalc_face_normals(w, faces=w.faces)
+    w.normal_update()
+    wbvh = BVHTree.FromBMesh(w)
+    na = Vector((math.sin(half), 0.0, math.cos(half)))   # upper face normal
+    nb = Vector((math.sin(half), 0.0, -math.cos(half)))  # lower face normal
+    for d in (na, nb, (na + nb).normalized()):
+        p = d * 0.5
+        assert not fit.is_inside(wbvh, p), ("outside the knife edge", tuple(p))
+    assert fit.is_inside(wbvh, Vector((-10.0, 0.0, 0.0)))
+    w.free()

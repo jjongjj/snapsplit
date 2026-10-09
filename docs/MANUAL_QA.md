@@ -198,6 +198,11 @@ SnapSplit 타이머는 없으므로 타이머에서 읽은 쪽은 MCP 애드온�
 - 단위 → 사용자 결정대로 Blender 표시 규약(1 BU = Unit Scale m). 표준 준비가 Millimeters + Unit Scale 0.001로 바뀌어 Origin도 mm로 표시.
 - 목록 잘림 → 컷 목록은 체크박스+이름만, 갭·커넥터 수는 아래 상자에 표시. 커넥터 목록은 "1 Pin  pin A".
 
+D7 수정(fix/d7-crosscut, 2026-10-09): 다른 컷을 넘어 세 번째 파트로 들어가는 핀/소켓(재현: Z −6 + 법선 (1,0.2,1.2) gap 0.5,
+Z 컷 커넥터가 BB로 2.64 mm)을 Distribute가 옮기거나 버리고, Build는 "reach across another cut" 경고와 함께 건너뛴다
+(`tests/cases/test_connectors_crosscut.py`). 함께 수정: 컷이 지나가지 않는 내부 공동(별도 셸)의 법선이 캡 처리 중 뒤집혀
+공동이 부피로 바뀌던 버그, 내부 판정의 칼날 모서리 오판, 샘플 간격보다 얇은 내부 특징 관통.
+
 ---
 
 ## P1 후속 수정 라이브 검증 (Blender 5.2.2, 공식 MCP, 2026-10-09, develop fafaed4)

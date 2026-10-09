@@ -7,8 +7,9 @@
 Positions come from distribute_points over each seam region of the final parts,
 inset by the connector's reach (radius + clearance + MIN_WALL_MM). Each position
 is then checked in 3D (connectors/fit.py: pin and socket, for both pin sides,
-inside the source with at least MIN_WALL_MM of material) and against the
-connectors already placed (sockets at least MIN_WALL_MM apart); a position that
+inside the source with at least MIN_WALL_MM of material, not reaching across
+any other enabled cut, no thin feature pierced) and against the connectors
+already placed (sockets at least MIN_WALL_MM apart); a position that
 does not fit is moved step by step towards the region's center and dropped if
 no step fits.
 """
@@ -83,11 +84,15 @@ def add_auto(context, obj, cut, kind, width_mm, height_mm, length_mm, replace=Tr
     spacing = 2.0 * (reach_mm(kind, width_mm, height_mm) + clearance) + MIN_WALL_MM
     wall = units.mm_to_scene(MIN_WALL_MM, scene)
     regions, bvh = seam_regions_mm(context, obj, cut)
+    stack = stack_api.get_stack(obj)
+    others = [pl for uid, pl in build.fit_planes(obj, [c for c in stack.cuts if c.enabled], scene).items()
+              if uid != cut.uid]
+    step = units.mm_to_scene(build.FIT_STEP_MM, scene)
 
     def fits(u, v):
         spec = build.make_spec(obj, cut, scene, "", u, v, 0.0, kind, width_mm, height_mm, length_mm,
                                clearance, 'A')
-        return fit.worst_depth(bvh, spec, both_sides=True) >= wall
+        return fit.check(spec, bvh, others, wall, both_sides=True, max_step=step).ok(wall)
 
     result, points = AutoResult(), []
     for loops in regions:
