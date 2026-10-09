@@ -12,7 +12,9 @@ Usage:
     python3 tests/run_tests.py [--blender EXE]... [--case PATTERN]... [--slow] [--gui]
 
 ``--gui`` additionally runs the modal-operator scenarios in ``tests/gui/gui_runner.py``
-in GUI Blender instances (simulated input; a few minutes; windows pop up).
+(QA-1..QA-4 mouse/keyboard steps, undo and file-load safety) in GUI Blender instances
+with simulated input; screenshots go to ``tests/_out/gui/``. Takes a few minutes;
+windows pop up and must not be touched while they run.
 
 Default Blender executables are BL45 and BL52 below (override with the
 environment variables of the same name). Windows executables are supported from
@@ -122,7 +124,9 @@ def run_blender(exe, args, timeout):
             "tmp": to_exe_path(TMP_DIR, exe)}
 
 
-GUI_SCENARIOS = ("adjust_undo_wheel", "conn_undo", "load_adjust", "load_conn")
+GUI_SCENARIOS = ("qa1_preview_color", "qa2_adjust", "qa3_connectors", "qa4_freehand",
+                 "adjust_undo_wheel", "conn_undo", "load_adjust", "load_conn")
+GUI_SHOTS_DIR = os.path.join(OUT_DIR, "gui")
 
 
 def run_gui(exe, scenario, timeout):
@@ -145,7 +149,10 @@ def run_gui(exe, scenario, timeout):
         "--repo", to_exe_path(repo_dir, exe),
         "--scenario", scenario,
         "--out", to_exe_path(json_path, exe),
+        "--shots", to_exe_path(GUI_SHOTS_DIR, exe),
+        "--label", label,
     ]
+    os.makedirs(GUI_SHOTS_DIR, exist_ok=True)
     env = blender_env(exe)
     t0 = time.time()
     with open(log_path, "w", encoding="utf-8") as log:
@@ -172,6 +179,8 @@ def run_gui(exe, scenario, timeout):
           and tempdir_ok(report, to_exe_path(TMP_DIR, exe)))
     lines = [f"  {'PASS' if ok else 'FAIL'} gui:{scenario:28} {elapsed:8.2f}s "
              f"exit={returncode} crash={crashed} tracebacks={python_errors} log={log_path}"]
+    if report and report.get("screenshots"):
+        lines.append("       screenshots: " + ", ".join(os.path.basename(p) for p in report["screenshots"]))
     for c in (report or {}).get("checks", []):
         if not c["ok"]:
             lines.append(f"       check failed: {c['name']}: {c['detail'][:300]}")

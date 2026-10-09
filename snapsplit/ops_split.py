@@ -50,6 +50,15 @@ from .core import log
 PREVIEW_COLL_NAME = "_SnapSplit_Preview"
 PREVIEW_PLANE_PREFIX = "_SnapSplit_PreviewPlane_"
 PREVIEW_MAT_NAME = "_SnapSplit_Preview_MAT"
+# Viewport color of the preview material. Solid shading (Color: Material) and the
+# Workbench engine use Material.diffuse_color, not the node tree, so it must be orange too.
+PREVIEW_COLOR = (1.0, 0.45, 0.0, 0.8)
+
+# Run tokens of the Adjust Split Axis modal operators currently running (plain Python
+# objects, no bpy references). While one runs, it owns the preview planes: the property
+# update callbacks must not delete/rebuild them on every offset write (that churn left
+# one orphan mesh per event behind).
+_ADJUST_RUNNING = set()
 
 # ---------------------------
 # bpy.ops fallback policy (documented for Extensions review)
@@ -341,6 +350,8 @@ def _snapsplit_load_post(_filepath=None):
     Property update callbacks do not fire when a .blend is loaded, so a file saved with
     a preview enabled would otherwise come back without a working handler.
     """
+    # No modal operator survives a file load (cancel() already ran); drop stale tokens
+    _ADJUST_RUNNING.clear()
     try:
         sync_depsgraph_handler()
     except Exception as e:
@@ -350,8 +361,24 @@ def _snapsplit_load_post(_filepath=None):
 # Preview material/planes
 # ---------------------------
 
+def _remove_preview_object(o):
+    """Remove a preview object together with its mesh, so no orphan mesh is left behind."""
+    me = o.data if o.type == 'MESH' else None
+    try:
+        bpy.data.objects.remove(o, do_unlink=True)
+    except Exception:
+        return
+    if me is not None and me.users == 0:
+        try:
+            bpy.data.meshes.remove(me)
+        except Exception:
+            pass
+
+
 def update_split_preview_plane(context):
     """Create/refresh or remove split preview planes when UI properties change."""
+    if _ADJUST_RUNNING:
+        return  # the Adjust Split Axis modal positions the planes itself
     try:
         scene = context.scene
         props = getattr(scene, "snapsplit", None)
@@ -378,8 +405,13 @@ def build_orange_preview_material():
     """Create or reuse the translucent orange preview material."""
     name = PREVIEW_MAT_NAME
     mat = bpy.data.materials.get(name)
-    if mat: return mat
+    if mat:
+        # Also fixes materials created by older versions (grey in Solid view)
+        if tuple(mat.diffuse_color) != PREVIEW_COLOR:
+            mat.diffuse_color = PREVIEW_COLOR
+        return mat
     mat = bpy.data.materials.new(name=name)
+    mat.diffuse_color = PREVIEW_COLOR
     mat.use_nodes = True
     nt = mat.node_tree
     for n in list(nt.nodes):
@@ -432,7 +464,8 @@ def create_or_get_preview_plane(context, obj, axis, name):
 
     plane.hide_set(False)
     plane.hide_viewport = False
-    plane.show_in_front = False
+    # Drawn in front: with X-Ray on, planes behind the faces would otherwise be washed out to grey
+    plane.show_in_front = True
     plane.display_type = 'TEXTURED'
     plane.show_wire = True
     plane.show_all_edges = True
@@ -495,11 +528,7 @@ def position_preview_planes_for_object(context, obj, axis, parts_count, offset_s
 
     if force_rebuild:
         for o in [o for o in bpy.data.objects if o.name.startswith(f"{PREVIEW_PLANE_PREFIX}{obj_name}_")]:
-            for coll in list(o.users_collection):
-                try: coll.objects.unlink(o)
-                except Exception: pass
-            try: bpy.data.objects.remove(o)
-            except Exception: pass
+            _remove_preview_object(o)
 
     for name, pos in zip(want_names, targets):
         plane = bpy.data.objects.get(name)
@@ -517,20 +546,11 @@ def position_preview_planes_for_object(context, obj, axis, parts_count, offset_s
     existing_scoped = [o for o in bpy.data.objects if o.name.startswith(f"{PREVIEW_PLANE_PREFIX}{obj_name}_")]
     for o in existing_scoped:
         if o.name not in want_names:
-            for coll in list(o.users_collection):
-                try: coll.objects.unlink(o)
-                except Exception: pass
-            try: bpy.data.objects.remove(o)
-            except Exception: pass
+            _remove_preview_object(o)
 
     stray = [o for o in bpy.data.objects if o.name.startswith(PREVIEW_PLANE_PREFIX) and f"{obj_name}_" not in o.name]
     for o in stray:
-        for coll in list(o.users_collection):
-            try: coll.objects.unlink(o)
-            except Exception: pass
-        try:
-            bpy.data.objects.remove(o)
-        except Exception: pass
+        _remove_preview_object(o)
 
 def _disable_split_preview_and_cleanup(context):
     """Disable the split preview toggle and remove all preview planes and empty collections."""
@@ -549,11 +569,7 @@ def _disable_split_preview_and_cleanup(context):
         pass
     try:
         for o in [o for o in bpy.data.objects if o.name.startswith(PREVIEW_PLANE_PREFIX)]:
-            for coll in list(o.users_collection):
-                try: coll.objects.unlink(o)
-                except Exception: pass
-            try: bpy.data.objects.remove(o)
-            except Exception: pass
+            _remove_preview_object(o)
     except Exception:
         pass
     try:
@@ -1245,6 +1261,9 @@ class SNAP_OT_adjust_split_axis(Operator):
         self.mid_world = 0.5 * (self.lo + self.hi)
 
         self.t_norm = 0.0
+        # Own copy of the last mouse height: the drag delta does not depend on
+        # event.mouse_prev_y (not filled for simulated input, coarse on some platforms)
+        self._mouse_y = event.mouse_y
         try:
             offset_scene = float(getattr(props, "split_offset_mm", 0.0)) * unit_mm()
             half = 0.5 * (self.hi - self.lo)
@@ -1277,12 +1296,18 @@ class SNAP_OT_adjust_split_axis(Operator):
             pass
 
         context.window_manager.modal_handler_add(self)
+        self._run_token = object()
+        _ADJUST_RUNNING.add(self._run_token)
         _tag_redraw(context)
 
         return {'RUNNING_MODAL'}
 
     def finish(self, context, cancelled=False):
         """Stop modal mode, optionally remove preview planes and report status."""
+        token = getattr(self, "_run_token", None)
+        if token is not None and token not in _ADJUST_RUNNING:
+            return  # already finished
+        _ADJUST_RUNNING.discard(token)
         keep = False
         # Restore X-Ray (finish() is called on every exit path of the modal operator)
         try:
@@ -1296,11 +1321,7 @@ class SNAP_OT_adjust_split_axis(Operator):
         if not keep:
             try:
                 for o in [o for o in bpy.data.objects if o.name.startswith(PREVIEW_PLANE_PREFIX)]:
-                    for coll in list(o.users_collection):
-                        try: coll.objects.unlink(o)
-                        except Exception: pass
-                    try: bpy.data.objects.remove(o)
-                    except Exception: pass
+                    _remove_preview_object(o)
             except Exception: pass
             _disable_split_preview_and_cleanup(context)
 
@@ -1315,6 +1336,16 @@ class SNAP_OT_adjust_split_axis(Operator):
         self.finish(context, cancelled=True)
 
     def modal(self, context, event):
+        """Handle mouse/keyboard events; any unexpected error ends the modal cleanly."""
+        try:
+            return self._modal(context, event)
+        except Exception:
+            import traceback
+            log.error("Adjust split axis failed, cancelling:\n%s", traceback.format_exc())
+            self.finish(context, cancelled=True)
+            return {'CANCELLED'}
+
+    def _modal(self, context, event):
         """Handle mouse/keyboard events to adjust offset and update the preview."""
         # Re-resolve everything: references from a previous event may be dangling after undo.
         obj = bpy.data.objects.get(getattr(self, "_obj_name", ""))
@@ -1342,7 +1373,8 @@ class SNAP_OT_adjust_split_axis(Operator):
             self.finish(context, cancelled=False); return {'FINISHED'}
 
         if event.type == 'MOUSEMOVE':
-            dy = event.mouse_prev_y - event.mouse_y
+            dy = getattr(self, "_mouse_y", event.mouse_y) - event.mouse_y
+            self._mouse_y = event.mouse_y
             if dy != 0:
                 self.t_norm = max(-1.0, min(1.0, self.t_norm - dy * 0.001))
                 self.current_world_pos, _ = world_pos_from_norm(obj, self.axis, self.t_norm)
@@ -1378,13 +1410,7 @@ class SNAP_OT_adjust_split_axis(Operator):
 
             parts_cnt = max(2, int(getattr(props, "parts_count", 2)))
             offset_scene = float(getattr(props, "split_offset_mm", 0.0)) * unit_mm()
-            try: position_preview_planes_for_object(context, obj, self.axis, parts_cnt, offset_scene)
-            except Exception: pass
-
-            try:
-                if getattr(props, "show_split_preview", False):
-                    update_split_preview_plane(context)
-            except Exception: pass
+            position_preview_planes_for_object(context, obj, self.axis, parts_cnt, offset_scene)
 
             _tag_redraw(context)
 
@@ -2523,6 +2549,7 @@ def unregister():
     _remove_handlers_named(bpy.app.handlers.load_post, _LOAD_HANDLER_NAME)
     _last_preview_active_obj = None
     _last_connector_preview_selection_key = None
+    _ADJUST_RUNNING.clear()
 
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

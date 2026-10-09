@@ -87,3 +87,63 @@ def run_op(op, **kwargs):
     result = op(**kwargs)
     assert result == {'FINISHED'}, f"{op.idname_py()} returned {result}"
     return result
+
+
+# ---------------------------------------------------------------------------
+# Calling modal operators in background mode
+# ---------------------------------------------------------------------------
+
+class _WindowManager:
+    """Accepts modal_handler_add(); everything else comes from the real one."""
+
+    def modal_handler_add(self, _op):
+        return True
+
+    def __getattr__(self, name):
+        return getattr(bpy.context.window_manager, name)
+
+
+class _Context:
+    """bpy.context with overrides (no window/area in background mode)."""
+
+    def __init__(self, **overrides):
+        self._overrides = overrides
+
+    def __getattr__(self, name):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(bpy.context, name)
+
+
+class ModalEvent:
+    """Minimal stand-in for bpy.types.Event passed to modal()."""
+
+    def __init__(self, type, value='PRESS', mouse_y=0, mouse_prev_y=0):
+        self.type = type
+        self.value = value
+        self.mouse_y = mouse_y
+        self.mouse_prev_y = mouse_prev_y
+        self.mouse_x = self.mouse_prev_x = 0
+        self.mouse_region_x = self.mouse_region_y = 0
+        self.shift = self.ctrl = self.alt = self.oskey = self.is_repeat = False
+
+
+def modal_context():
+    """Context for calling invoke()/modal() in background mode (no window/area)."""
+    return _Context(window_manager=_WindowManager(), area=None, region=None,
+                    region_data=None, space_data=None)
+
+
+def stand_in(op_cls):
+    """Instance of a plain class with the operator's methods and Python properties.
+
+    Modal operators cannot be invoked in background mode; tests call
+    ``op_cls.invoke(op, ctx, event)`` / ``op_cls.modal(...)`` on this instead.
+    Returns ``(op, reports)``.
+    """
+    reports = []
+    ns = {k: v for k, v in vars(op_cls).items()
+          if callable(v) or isinstance(v, property)}
+    ns["report"] = lambda self, level, msg: reports.append((set(level), msg))
+    op = type("StandIn_" + op_cls.__name__, (), ns)()
+    return op, reports
